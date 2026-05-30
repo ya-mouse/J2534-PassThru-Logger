@@ -3,6 +3,12 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Agent scratch directory
+tmp/
+
+# Agent local environment (user-specific)
+.agents/local.env
+
 # User-specific files
 *.suo
 *.user
