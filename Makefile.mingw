@@ -6,7 +6,7 @@ CC ?= i686-w64-mingw32-g++
 WINDRES ?= i686-w64-mingw32-windres
 
 SRCDIR = PassThruLogger
-OUTDIR = build
+OUTDIR ?= build
 TARGET = $(OUTDIR)/PassThruLogger.dll
 
 SOURCES = \
@@ -16,11 +16,13 @@ SOURCES = \
 	$(SRCDIR)/NetworkWriter.cpp \
 	$(SRCDIR)/RegUtils.cpp
 
+EXTRA_CXXFLAGS ?= -O2
+
 CXXFLAGS = \
 	-std=c++14 \
 	-m32 \
 	-shared \
-	-O2 \
+	$(EXTRA_CXXFLAGS) \
 	-DWIN32 \
 	-D_WINDOWS \
 	-D_USRDLL \
