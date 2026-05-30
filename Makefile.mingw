@@ -14,7 +14,8 @@ SOURCES = \
 	$(SRCDIR)/PassThruLogger.cpp \
 	$(SRCDIR)/Loader4.cpp \
 	$(SRCDIR)/NetworkWriter.cpp \
-	$(SRCDIR)/RegUtils.cpp
+	$(SRCDIR)/RegUtils.cpp \
+	$(SRCDIR)/AutoConnect.cpp
 
 EXTRA_CXXFLAGS ?= -O2
 

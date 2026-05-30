@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -23,6 +24,29 @@ namespace PassThruLoggerControl
         // Thread signal.
         public static ManualResetEvent allDone = new ManualResetEvent(false);
 
+        // Protocol items for the combo box
+        private static readonly (string Name, uint Value)[] Protocols = new[]
+        {
+            ("CAN", (uint)0x05),
+            ("ISO15765", (uint)0x06),
+            ("J1850VPW", (uint)0x01),
+            ("J1850PWM", (uint)0x02),
+            ("ISO9141", (uint)0x03),
+            ("ISO14230", (uint)0x04),
+            ("SCI_A_ENGINE", (uint)0x07),
+            ("SCI_A_TRANS", (uint)0x08),
+            ("SCI_B_ENGINE", (uint)0x09),
+            ("SCI_B_TRANS", (uint)0x0A),
+        };
+
+        // Common baud rates
+        private static readonly string[] BaudRates = new[]
+        {
+            "500000", "250000", "125000", "1000000",
+            "33333", "50000", "83333", "100000",
+            "10400", "9600", "4800"
+        };
+
         /////////////////////// Constructor/Destructor
         public J2534LogController()
         {
@@ -31,6 +55,14 @@ namespace PassThruLoggerControl
             socketServerThread = new Thread(new ThreadStart(socketServerFunction));
 
             connectionBindingSource.DataSource = connectionBindingList;
+
+            // Populate protocol combo
+            foreach (var p in Protocols)
+                protocolCombo.Items.Add(p.Name);
+
+            // Populate baud rate combo
+            foreach (var b in BaudRates)
+                baudRateCombo.Items.Add(b);
 
             RegistryHelper.ScanDrivers(drivers);
             defaultdriver.DataSource = drivers;
@@ -66,6 +98,9 @@ namespace PassThruLoggerControl
                             loggerRegEntry.SetValue("DefaultDriverKey", drivers[0].key, RegistryValueKind.String);
                         }
                     }
+
+                    // Load auto-connect settings
+                    LoadConnectSettings(loggerRegEntry);
                 }
             }
 
@@ -92,6 +127,45 @@ namespace PassThruLoggerControl
             }
 
             socketServerThread.Start();
+        }
+
+        /////////////////////// Settings persistence
+        private void LoadConnectSettings(RegistryKey regKey)
+        {
+            // Protocol
+            var protocolVal = regKey.GetValue("ConnectProtocolID");
+            uint protocolId = (protocolVal is int pv) ? (uint)pv : 0x05; // default CAN
+            int protoIdx = Array.FindIndex(Protocols, p => p.Value == protocolId);
+            protocolCombo.SelectedIndex = (protoIdx >= 0) ? protoIdx : 0;
+
+            // Baud rate
+            var baudVal = regKey.GetValue("ConnectBaudRate");
+            uint baudRate = (baudVal is int bv) ? (uint)bv : 500000;
+            baudRateCombo.Text = baudRate.ToString();
+
+            // Flags
+            var flagsVal = regKey.GetValue("ConnectFlags");
+            uint flags = (flagsVal is int fv) ? (uint)fv : 0;
+            flagsTextBox.Text = flags.ToString();
+
+            // Device name
+            var devName = regKey.GetValue("DeviceName") as string ?? "";
+            deviceNameTextBox.Text = devName;
+
+            // Auto-inject
+            var autoVal = regKey.GetValue("AutoInjectConnect");
+            bool autoInject = (autoVal is int av) ? av != 0 : true;
+            autoInjectCheckBox.Checked = autoInject;
+        }
+
+        private void SaveConnectSetting(string name, object value, RegistryValueKind kind)
+        {
+            if (!initDone) return;
+            using (var reg32 = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32))
+            using (var entry = reg32.CreateSubKey(@"Software\Passthru Logger"))
+            {
+                entry.SetValue(name, value, kind);
+            }
         }
 
         /////////////////////// Server setup functions
@@ -157,16 +231,14 @@ namespace PassThruLoggerControl
         /////////////////////// Extra functions
         public void updateConnectionListEntry(ConnectionInfo conninfo)
         {
-            //Invoke(new MethodInvoker(delegate () { loggerconnections.Rows[connectionBindingList.IndexOf(conninfo)].Cells[1].Style.BackColor = Color.Red; }));
             Invoke(new MethodInvoker(delegate () { connectionBindingList.ResetItem(connectionBindingList.IndexOf(conninfo)); }));
         }
 
         public void addLinesToLogPreview(ConnectionInfo conninfo, string[] lines)
         {
             Invoke(new MethodInvoker(delegate () {
+                if (connectionBindingList.Count == 0 || loggerconnections.CurrentCell == null) return;
                 if (connectionBindingList[loggerconnections.CurrentCell.RowIndex] != conninfo) return;
-
-                //if (logpreview.TopIndex == logpreview.Items.Count) return;
 
                 int visibleItems = logpreview.ClientSize.Height / logpreview.ItemHeight;
                 var tmp = Math.Max(logpreview.Items.Count - visibleItems, 0);
@@ -184,6 +256,8 @@ namespace PassThruLoggerControl
         /////////////////////// UI Events
         private void savelog_Click(object sender, EventArgs e)
         {
+            logsavewindow.Filter = "Plain Text Log (*.txt)|*.txt|JSON Log (*.json)|*.json|All Files (*.*)|*.*";
+            logsavewindow.DefaultExt = "txt";
             logsavewindow.ShowDialog();
         }
 
@@ -203,7 +277,19 @@ namespace PassThruLoggerControl
         private void saveFileDialog1_FileOk(object sender, CancelEventArgs e)
         {
             if (e.Cancel) return;
-            connectionBindingList[loggerconnections.CurrentCell.RowIndex].saveLog(logsavewindow.FileName);
+            if (loggerconnections.CurrentCell == null) return;
+
+            var conn = connectionBindingList[loggerconnections.CurrentCell.RowIndex];
+            string fileName = logsavewindow.FileName;
+
+            if (fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                conn.saveLogJson(fileName);
+            }
+            else
+            {
+                conn.saveLog(fileName);
+            }
         }
 
         private void Form1_FormClosing(object sender, EventArgs e)
@@ -221,6 +307,7 @@ namespace PassThruLoggerControl
         {
             //Rows can not be removed, so there is no reason to disable this button after a row appears.
             savelog.Enabled = true;
+            removeConnectionButton.Enabled = true;
 
             logpreview.Items.Clear();
             foreach (var row in connectionBindingList[e.RowIndex].logPreviewEntries)
@@ -230,6 +317,71 @@ namespace PassThruLoggerControl
         private void loggerconnections_RowLeave(object sender, DataGridViewCellEventArgs e)
         {
             Console.WriteLine("CellLeave");
+        }
+
+        /////////////////////// Clear / Remove buttons
+        private void clearAllButton_Click(object sender, EventArgs e)
+        {
+            // Close all connections and clear the list
+            foreach (var conn in connectionBindingList)
+                conn.close();
+
+            connectionBindingList.Clear();
+            logpreview.Items.Clear();
+            savelog.Enabled = false;
+            removeConnectionButton.Enabled = false;
+        }
+
+        private void removeConnectionButton_Click(object sender, EventArgs e)
+        {
+            if (loggerconnections.CurrentCell == null) return;
+            int idx = loggerconnections.CurrentCell.RowIndex;
+            if (idx < 0 || idx >= connectionBindingList.Count) return;
+
+            var conn = connectionBindingList[idx];
+            conn.close();
+            connectionBindingList.RemoveAt(idx);
+            logpreview.Items.Clear();
+
+            if (connectionBindingList.Count == 0)
+            {
+                savelog.Enabled = false;
+                removeConnectionButton.Enabled = false;
+            }
+        }
+
+        /////////////////////// Settings change handlers
+        private void protocolCombo_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (!initDone || protocolCombo.SelectedIndex < 0) return;
+            uint val = Protocols[protocolCombo.SelectedIndex].Value;
+            SaveConnectSetting("ConnectProtocolID", (int)val, RegistryValueKind.DWord);
+        }
+
+        private void baudRateCombo_TextChanged(object sender, EventArgs e)
+        {
+            if (!initDone) return;
+            if (uint.TryParse(baudRateCombo.Text, out uint val))
+                SaveConnectSetting("ConnectBaudRate", (int)val, RegistryValueKind.DWord);
+        }
+
+        private void flagsTextBox_TextChanged(object sender, EventArgs e)
+        {
+            if (!initDone) return;
+            if (uint.TryParse(flagsTextBox.Text, out uint val))
+                SaveConnectSetting("ConnectFlags", (int)val, RegistryValueKind.DWord);
+        }
+
+        private void deviceNameTextBox_TextChanged(object sender, EventArgs e)
+        {
+            if (!initDone) return;
+            SaveConnectSetting("DeviceName", deviceNameTextBox.Text, RegistryValueKind.String);
+        }
+
+        private void autoInjectCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            if (!initDone) return;
+            SaveConnectSetting("AutoInjectConnect", autoInjectCheckBox.Checked ? 1 : 0, RegistryValueKind.DWord);
         }
     }
 }

@@ -4,11 +4,13 @@
 #include "Loader4.h"
 #include "NetworkWriter.h"
 #include "WireProtocolConstants.h"
+#include "AutoConnect.h"
 
 unsigned int refcount = 0;
 std::string driverKeyName;
 bool loadedFine = FALSE;
 std::unique_ptr<NetworkWriter> writer;
+ConnectConfig connectConfig;
 
 bool loadDriver() {
 
@@ -47,6 +49,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 				printf("WSAStartup failed with error: %d\n", iResult);
 				break;
 			}
+
+			// Load connect configuration from registry
+			LoadConnectConfig(connectConfig);
+
 			//Socket client = new Socket(ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 			writer = std::make_unique<NetworkWriter>(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP);
 			if (!writer->connect("localhost", "2534"))

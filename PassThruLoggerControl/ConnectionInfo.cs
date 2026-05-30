@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 
 namespace PassThruLoggerControl
@@ -21,6 +22,7 @@ namespace PassThruLoggerControl
         private string tmpLogPath;
 
         public LinkedList<string> logPreviewEntries = new LinkedList<string>();
+        private List<LogEntry> structuredLog = new List<LogEntry>();
 
         private StreamWriter logWriter;
         private bool closed = false;
@@ -240,6 +242,28 @@ namespace PassThruLoggerControl
             File.Copy(tmpLogPath, fileName);
         }
 
+        internal void saveLogJson(string fileName)
+        {
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+
+            var export = new
+            {
+                connectionId = ID,
+                client = Client,
+                driver = Driver,
+                status = state.ToString(),
+                eventCount = EventCount,
+                entries = structuredLog
+            };
+
+            string json = JsonSerializer.Serialize(export, options);
+            File.WriteAllText(fileName, json);
+        }
+
         internal void close()
         {
             closed = true;
@@ -256,6 +280,13 @@ namespace PassThruLoggerControl
         {
             logWriter.WriteLine(entry);
 
+            structuredLog.Add(new LogEntry
+            {
+                Timestamp = DateTime.UtcNow,
+                Text = entry,
+                Index = EventCount
+            });
+
             string[] lines = entry.Split('\n');
             form.addLinesToLogPreview(this, lines);
             foreach (string line in lines)
@@ -263,5 +294,12 @@ namespace PassThruLoggerControl
             while (logPreviewEntries.Count > maxLogPreviewEntryCount)
                 logPreviewEntries.RemoveFirst();
         }
+    }
+
+    public class LogEntry
+    {
+        public DateTime Timestamp { get; set; }
+        public string Text { get; set; }
+        public int Index { get; set; }
     }
 }

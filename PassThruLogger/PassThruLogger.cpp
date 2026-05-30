@@ -3,10 +3,12 @@
 #include "RegUtils.h"
 #include "NetworkWriter.h"
 #include "WireProtocolConstants.h"
+#include "AutoConnect.h"
 
 //Set in DLLMAIN
 extern bool loadedFine;
 extern std::unique_ptr<NetworkWriter> writer;
+extern ConnectConfig connectConfig;
 
 // A quick way to avoid the name mangling that __stdcall liked to do
 // On MSVC: uses linker pragma. On mingw: exports via .def file.
@@ -81,7 +83,19 @@ void writeApiMsgHeader(J2534_0404func func) {
 PANDAJ2534DLL_API long PTAPI PassThruOpen(void *pName, unsigned long *pDeviceID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalOpen(pName, pDeviceID);
+
+	// Use configured device name if pName is NULL and config has one
+	void* effectiveName = pName;
+	if (pName == NULL && !connectConfig.deviceName.empty()) {
+		effectiveName = (void*)connectConfig.deviceName.c_str();
+	}
+
+	auto res = LocalOpen(effectiveName, pDeviceID);
+
+	// Track device state for auto-inject
+	if (res == STATUS_NOERROR && pDeviceID != NULL) {
+		InitDeviceState(*pDeviceID);
+	}
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruOpen);
 
@@ -96,6 +110,10 @@ PANDAJ2534DLL_API long PTAPI PassThruOpen(void *pName, unsigned long *pDeviceID)
 PANDAJ2534DLL_API long PTAPI PassThruClose(unsigned long DeviceID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
+
+	// Tear down any injected channel before closing
+	CleanupBeforeClose(DeviceID);
+
 	auto res = LocalClose(DeviceID);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruClose);
@@ -110,6 +128,11 @@ PANDAJ2534DLL_API long PTAPI PassThruConnect(unsigned long DeviceID, unsigned lo
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
 	auto res = LocalConnect(DeviceID, ProtocolID, Flags, BaudRate, pChannelID);
+
+	// Track client's own channel for auto-inject logic
+	if (res == STATUS_NOERROR && pChannelID != NULL) {
+		OnClientConnect(DeviceID, *pChannelID);
+	}
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruConnect);
 
@@ -126,7 +149,8 @@ PANDAJ2534DLL_API long PTAPI PassThruConnect(unsigned long DeviceID, unsigned lo
 PANDAJ2534DLL_API long PTAPI PassThruDisconnect(unsigned long ChannelID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalDisconnect(ChannelID);
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
+	auto res = LocalDisconnect(resolvedId);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruDisconnect);
 
@@ -138,8 +162,9 @@ PANDAJ2534DLL_API long PTAPI PassThruDisconnect(unsigned long ChannelID) {
 PANDAJ2534DLL_API long PTAPI PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg, unsigned long *pNumMsgs, unsigned long Timeout) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
 	unsigned long preCallNumMsgs = *pNumMsgs;
-	auto res = LocalReadMsgs(ChannelID, pMsg, pNumMsgs, Timeout);
+	auto res = LocalReadMsgs(resolvedId, pMsg, pNumMsgs, Timeout);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruReadMsgs);
 
@@ -163,8 +188,9 @@ PANDAJ2534DLL_API long PTAPI PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_
 PANDAJ2534DLL_API long PTAPI PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg, unsigned long *pNumMsgs, unsigned long Timeout) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
 	unsigned long preCallNumMsgs = *pNumMsgs;
-	auto res = LocalWriteMsgs(ChannelID, pMsg, pNumMsgs, Timeout);
+	auto res = LocalWriteMsgs(resolvedId, pMsg, pNumMsgs, Timeout);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruWriteMsgs);
 
@@ -188,7 +214,8 @@ PANDAJ2534DLL_API long PTAPI PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU
 PANDAJ2534DLL_API long PTAPI PassThruStartPeriodicMsg(unsigned long ChannelID, PASSTHRU_MSG *pMsg, unsigned long *pMsgID, unsigned long TimeInterval) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalStartPeriodicMsg(ChannelID, pMsg, pMsgID, TimeInterval);
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
+	auto res = LocalStartPeriodicMsg(resolvedId, pMsg, pMsgID, TimeInterval);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruStartPeriodicMsg);
 
@@ -205,7 +232,8 @@ PANDAJ2534DLL_API long PTAPI PassThruStartPeriodicMsg(unsigned long ChannelID, P
 PANDAJ2534DLL_API long PTAPI PassThruStopPeriodicMsg(unsigned long ChannelID, unsigned long MsgID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalStopPeriodicMsg(ChannelID, MsgID);
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
+	auto res = LocalStopPeriodicMsg(resolvedId, MsgID);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruStopPeriodicMsg);
 
@@ -219,7 +247,8 @@ PANDAJ2534DLL_API long PTAPI PassThruStartMsgFilter(unsigned long ChannelID, uns
 													PASSTHRU_MSG *pPatternMsg, PASSTHRU_MSG *pFlowControlMsg, unsigned long *pFilterID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalStartMsgFilter(ChannelID, FilterType, pMaskMsg, pPatternMsg, pFlowControlMsg, pFilterID);
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
+	auto res = LocalStartMsgFilter(resolvedId, FilterType, pMaskMsg, pPatternMsg, pFlowControlMsg, pFilterID);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruStartMsgFilter);
 
@@ -239,7 +268,8 @@ PANDAJ2534DLL_API long PTAPI PassThruStartMsgFilter(unsigned long ChannelID, uns
 PANDAJ2534DLL_API long PTAPI PassThruStopMsgFilter(unsigned long ChannelID, unsigned long FilterID) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalStopMsgFilter(ChannelID, FilterID);
+	unsigned long resolvedId = ResolveChannelId(ChannelID);
+	auto res = LocalStopMsgFilter(resolvedId, FilterID);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruStopMsgFilter);
 
@@ -297,7 +327,28 @@ PANDAJ2534DLL_API long PTAPI PassThruGetLastError(char *pErrorDescription) {
 PANDAJ2534DLL_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned long IoctlID, void *pInput, void *pOutput) {
 	#pragma EXPORT
 	if (!loadedFine) return ERR_DEVICE_NOT_CONNECTED;
-	auto res = LocalIoctl(ChannelID, IoctlID, pInput, pOutput);
+	// Resolve channel ID for channel-scoped IOCTLs
+	unsigned long resolvedId = ChannelID;
+	switch (IoctlID) {
+	case GET_CONFIG:
+	case SET_CONFIG:
+	case READ_VBATT:
+	case FIVE_BAUD_INIT:
+	case FAST_INIT:
+	case CLEAR_TX_BUFFER:
+	case CLEAR_RX_BUFFER:
+	case CLEAR_PERIODIC_MSGS:
+	case CLEAR_MSG_FILTERS:
+	case CLEAR_FUNCT_MSG_LOOKUP_TABLE:
+	case ADD_TO_FUNCT_MSG_LOOKUP_TABLE:
+	case DELETE_FROM_FUNCT_MSG_LOOKUP_TABLE:
+	case SW_CAN_HS:
+	case SW_CAN_NS:
+		resolvedId = ResolveChannelId(ChannelID);
+		break;
+	// Device-scoped IOCTLs: READ_PROG_VOLTAGE, SET_POLL_RESPONSE, BECOME_MASTER — no rewrite
+	}
+	auto res = LocalIoctl(resolvedId, IoctlID, pInput, pOutput);
 
 	writeApiMsgHeader(J2534_0404func::API_PassThruIoctl);
 

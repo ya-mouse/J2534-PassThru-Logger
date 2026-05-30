@@ -1,12 +1,12 @@
 #include "stdafx.h"
 #include "RegUtils.h"
 
-LONG GetDWORDRegKey(HKEY hKey, const std::wstring &strValueName, DWORD &nValue, DWORD nDefaultValue)
+LONG GetDWORDRegKey(HKEY hKey, const std::string &strValueName, DWORD &nValue, DWORD nDefaultValue)
 {
 	nValue = nDefaultValue;
 	DWORD dwBufferSize(sizeof(DWORD));
 	DWORD nResult(0);
-	LONG nError = ::RegQueryValueExW(hKey,
+	LONG nError = ::RegQueryValueExA(hKey,
 		strValueName.c_str(),
 		0,
 		NULL,
@@ -20,11 +20,11 @@ LONG GetDWORDRegKey(HKEY hKey, const std::wstring &strValueName, DWORD &nValue, 
 }
 
 
-LONG GetBoolRegKey(HKEY hKey, const std::wstring &strValueName, bool &bValue, bool bDefaultValue)
+LONG GetBoolRegKey(HKEY hKey, const std::string &strValueName, bool &bValue, bool bDefaultValue)
 {
 	DWORD nDefValue((bDefaultValue) ? 1 : 0);
 	DWORD nResult(nDefValue);
-	LONG nError = GetDWORDRegKey(hKey, strValueName.c_str(), nResult, nDefValue);
+	LONG nError = GetDWORDRegKey(hKey, strValueName, nResult, nDefValue);
 	if (ERROR_SUCCESS == nError)
 	{
 		bValue = (nResult != 0) ? true : false;
