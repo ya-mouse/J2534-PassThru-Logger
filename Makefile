@@ -25,9 +25,8 @@ DOCKER_IMAGE = j2534-builder
 DOTNET ?= $(shell command -v dotnet 2>/dev/null || echo /usr/local/share/dotnet/dotnet)
 RID ?= win-x64
 
-# .NET publish flags
-DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained \
-	-p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+# .NET publish flags (framework-dependent — requires .NET 8 runtime on target)
+DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
 .PHONY: all dll control sample clean docker-image
