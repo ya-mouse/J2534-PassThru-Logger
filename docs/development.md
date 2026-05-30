@@ -2,23 +2,45 @@
 
 ## Solution Structure
 
-The Visual Studio 2017 solution (`J2534 PassThru Logger.sln`) contains three projects:
+The solution contains three projects:
 
 | Project | Type | Language | Output |
 |---------|------|----------|--------|
 | PassThruLogger | Win32 DLL (x86) | C++ | PassThruLogger.dll |
-| PassThruLoggerControl | WinForms App | C# (.NET 4.0) | PassThruLoggerControl.exe |
-| SampleClient | Console App | C# (.NET 4.0) | AsynchronousClient.exe |
+| PassThruLoggerControl | WinForms App | C# (.NET 8) | PassThruLoggerControl.exe |
+| SampleClient | Console App | C# (.NET 8) | AsynchronousClient.exe |
 
 ## Build
 
-### Requirements
+### Requirements (macOS cross-compilation)
+
+- Docker (for C++ DLL via mingw-w64)
+- .NET SDK 8.0+ (for C# projects, framework-dependent publish)
+- GNU Make
+
+### Commands
+
+```bash
+# Full build (all three projects → build/Release/)
+make
+
+# Debug build
+make DEBUG=1
+
+# Individual targets
+make dll        # C++ DLL only (Docker + mingw-w64)
+make control    # PassThruLoggerControl only (dotnet publish)
+make sample     # SampleClient only (dotnet publish)
+
+# Clean
+make clean
+```
+
+### Requirements (Windows native)
 
 - Visual Studio 2017+ (or MSBuild 15+)
 - Windows SDK
-- .NET Framework 4.0 targeting pack
-
-### Commands
+- .NET 8 SDK
 
 ```bash
 # Full solution build (Release)
@@ -28,10 +50,35 @@ msbuild "J2534 PassThru Logger.sln" /p:Configuration=Release
 msbuild PassThruLogger\PassThruLogger.vcxproj /p:Configuration=Release /p:Platform=Win32
 
 # Control app only
-msbuild PassThruLoggerControl\PassThruLoggerControl.csproj /p:Configuration=Release
+dotnet publish -c Release PassThruLoggerControl/PassThruLoggerControl.csproj
 ```
 
 The DLL is built as **x86 (Win32)** — this is required because J2534 drivers are 32-bit.
+
+## Registry Configuration
+
+All settings are stored under `HKCU\Software\Passthru Logger`:
+
+| Value | Type | Default | Description |
+|-------|------|---------|-------------|
+| `DefaultDriverKey` | REG_SZ | (empty) | Registry path of the real J2534 driver to proxy |
+| `ConnectProtocolID` | REG_DWORD | 5 (CAN) | Protocol ID for auto-injected PassThruConnect |
+| `ConnectBaudRate` | REG_DWORD | 500000 | Baud rate for auto-injected PassThruConnect |
+| `ConnectFlags` | REG_DWORD | 0 | Flags for auto-injected PassThruConnect |
+| `DeviceName` | REG_SZ | (empty) | Device name override for PassThruOpen (empty = NULL) |
+| `AutoInjectConnect` | REG_DWORD | 1 | Enable/disable auto-inject of PassThruConnect |
+
+The Control app provides a UI to configure these values. The DLL reads them at load time.
+
+## Auto-Inject Feature
+
+When `AutoInjectConnect` is enabled, the DLL automatically calls `PassThruConnect` on the
+real driver if a channel-scoped API call arrives (ReadMsgs, WriteMsgs, StartMsgFilter, etc.)
+but no `PassThruConnect` has been issued yet by the client.
+
+This is useful for devices like the Kvaser that require a connected channel before
+performing any message operations. The injected channel is transparent to the client and
+is cleaned up when the client issues its own Connect or when PassThruClose is called.
 
 ## Testing
 
