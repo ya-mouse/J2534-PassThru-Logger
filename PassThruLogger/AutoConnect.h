@@ -9,6 +9,7 @@ struct ConnectConfig {
 	DWORD flags;        // default: 0
 	bool autoInject;    // default: true
 	std::string deviceName; // default: "" (empty = NULL)
+	DWORD mockVbattMv;  // mock VBATT in millivolts; 0 = disabled
 };
 
 // Per-device state tracking

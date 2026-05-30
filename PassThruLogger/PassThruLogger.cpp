@@ -350,6 +350,12 @@ PANDAJ2534DLL_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned lon
 	}
 	auto res = LocalIoctl(resolvedId, IoctlID, pInput, pOutput);
 
+	// Mock VBATT: if real driver returns ERR_NOT_SUPPORTED and mock is configured
+	if (IoctlID == READ_VBATT && res == ERR_NOT_SUPPORTED && connectConfig.mockVbattMv > 0 && pOutput != NULL) {
+		*((unsigned long*)pOutput) = connectConfig.mockVbattMv;
+		res = STATUS_NOERROR;
+	}
+
 	writeApiMsgHeader(J2534_0404func::API_PassThruIoctl);
 
 	writeParamInt(ChannelID);

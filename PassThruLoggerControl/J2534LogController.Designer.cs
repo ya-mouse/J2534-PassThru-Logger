@@ -55,6 +55,8 @@ namespace PassThruLoggerControl
             this.labelDeviceName = new System.Windows.Forms.Label();
             this.deviceNameTextBox = new System.Windows.Forms.TextBox();
             this.autoInjectCheckBox = new System.Windows.Forms.CheckBox();
+            this.labelMockVbatt = new System.Windows.Forms.Label();
+            this.mockVbattTextBox = new System.Windows.Forms.TextBox();
             this.iDDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.statusDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.eventCountDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -258,6 +260,8 @@ namespace PassThruLoggerControl
             this.settingsLayout.Controls.Add(this.labelDeviceName, 2, 1);
             this.settingsLayout.Controls.Add(this.deviceNameTextBox, 3, 1);
             this.settingsLayout.Controls.Add(this.autoInjectCheckBox, 0, 2);
+            this.settingsLayout.Controls.Add(this.labelMockVbatt, 2, 2);
+            this.settingsLayout.Controls.Add(this.mockVbattTextBox, 3, 2);
             this.settingsLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.settingsLayout.Location = new System.Drawing.Point(3, 18);
             this.settingsLayout.Name = "settingsLayout";
@@ -366,6 +370,27 @@ namespace PassThruLoggerControl
             this.autoInjectCheckBox.UseVisualStyleBackColor = true;
             this.autoInjectCheckBox.CheckedChanged += new System.EventHandler(this.autoInjectCheckBox_CheckedChanged);
             // 
+            // labelMockVbatt
+            // 
+            this.labelMockVbatt.AutoSize = true;
+            this.labelMockVbatt.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.labelMockVbatt.Location = new System.Drawing.Point(425, 67);
+            this.labelMockVbatt.Margin = new System.Windows.Forms.Padding(3, 7, 3, 0);
+            this.labelMockVbatt.Name = "labelMockVbatt";
+            this.labelMockVbatt.Size = new System.Drawing.Size(80, 23);
+            this.labelMockVbatt.TabIndex = 9;
+            this.labelMockVbatt.Text = "Mock VBATT (V):";
+            // 
+            // mockVbattTextBox
+            // 
+            this.mockVbattTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.mockVbattTextBox.Location = new System.Drawing.Point(511, 63);
+            this.mockVbattTextBox.Name = "mockVbattTextBox";
+            this.mockVbattTextBox.Size = new System.Drawing.Size(344, 22);
+            this.mockVbattTextBox.TabIndex = 10;
+            this.mockVbattTextBox.Text = "0.0";
+            this.mockVbattTextBox.TextChanged += new System.EventHandler(this.mockVbattTextBox_TextChanged);
+            // 
             // iDDataGridViewTextBoxColumn
             // 
             this.iDDataGridViewTextBoxColumn.DataPropertyName = "ID";
@@ -465,6 +490,8 @@ namespace PassThruLoggerControl
         private Label labelDeviceName;
         private TextBox deviceNameTextBox;
         private CheckBox autoInjectCheckBox;
+        private Label labelMockVbatt;
+        private TextBox mockVbattTextBox;
     }
 }
 

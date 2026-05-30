@@ -25,6 +25,7 @@ void LoadConnectConfig(ConnectConfig& config) {
 	config.flags = 0;
 	config.autoInject = true;
 	config.deviceName = "";
+	config.mockVbattMv = 0;
 
 	HKEY key;
 	LONG lRes = RegOpenKeyExA(HKEY_CURRENT_USER, LOGGER_REG_KEY, 0, KEY_READ, &key);
@@ -43,6 +44,10 @@ void LoadConnectConfig(ConnectConfig& config) {
 		config.autoInject = (autoInject != 0);
 
 	GetStringRegKey(key, "DeviceName", config.deviceName, "");
+
+	DWORD mockMv;
+	if (GetDWORDRegKey(key, "MockVbattMv", mockMv, 0) == ERROR_SUCCESS)
+		config.mockVbattMv = mockMv;
 
 	RegCloseKey(key);
 	g_config = config;

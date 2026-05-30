@@ -156,6 +156,11 @@ namespace PassThruLoggerControl
             var autoVal = regKey.GetValue("AutoInjectConnect");
             bool autoInject = (autoVal is int av) ? av != 0 : true;
             autoInjectCheckBox.Checked = autoInject;
+
+            // Mock VBATT (stored as millivolts, displayed as volts)
+            var vbattVal = regKey.GetValue("MockVbattMv");
+            uint vbattMv = (vbattVal is int vv) ? (uint)vv : 0;
+            mockVbattTextBox.Text = (vbattMv / 1000.0).ToString("F1");
         }
 
         private void SaveConnectSetting(string name, object value, RegistryValueKind kind)
@@ -382,6 +387,18 @@ namespace PassThruLoggerControl
         {
             if (!initDone) return;
             SaveConnectSetting("AutoInjectConnect", autoInjectCheckBox.Checked ? 1 : 0, RegistryValueKind.DWord);
+        }
+
+        private void mockVbattTextBox_TextChanged(object sender, EventArgs e)
+        {
+            if (!initDone) return;
+            if (float.TryParse(mockVbattTextBox.Text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float volts))
+            {
+                int millivolts = (int)(volts * 1000.0f);
+                if (millivolts >= 0)
+                    SaveConnectSetting("MockVbattMv", millivolts, RegistryValueKind.DWord);
+            }
         }
     }
 }
