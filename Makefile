@@ -37,13 +37,13 @@ all: dll control sample
 # ─── C++ DLL (Docker + mingw-w64) ────────────────────────────────────────────
 
 dll: docker-image
-	@mkdir -p $(OUTDIR)/PassThruLogger
+	@mkdir -p $(OUTDIR)
 	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
 		make -f Makefile.mingw \
 		CC=i686-w64-mingw32-g++ \
-		OUTDIR=$(OUTDIR)/PassThruLogger \
+		OUTDIR=$(OUTDIR) \
 		EXTRA_CXXFLAGS="$(MINGW_OPT)"
-	@echo "→ $(OUTDIR)/PassThruLogger/PassThruLogger.dll"
+	@echo "→ $(OUTDIR)/PassThruLogger.dll"
 
 docker-image:
 	@docker inspect $(DOCKER_IMAGE) >/dev/null 2>&1 || \
@@ -52,18 +52,18 @@ docker-image:
 # ─── C# PassThruLoggerControl ────────────────────────────────────────────────
 
 control:
-	@mkdir -p $(OUTDIR)/PassThruLoggerControl
-	$(DOTNET_PUBLISH) -o $(OUTDIR)/PassThruLoggerControl \
+	@mkdir -p $(OUTDIR)
+	$(DOTNET_PUBLISH) -o $(OUTDIR) \
 		PassThruLoggerControl/PassThruLoggerControl.csproj
-	@echo "→ $(OUTDIR)/PassThruLoggerControl/"
+	@echo "→ $(OUTDIR)/PassThruLoggerControl.exe"
 
 # ─── C# SampleClient ─────────────────────────────────────────────────────────
 
 sample:
-	@mkdir -p $(OUTDIR)/SampleClient
-	$(DOTNET_PUBLISH) -o $(OUTDIR)/SampleClient \
+	@mkdir -p $(OUTDIR)
+	$(DOTNET_PUBLISH) -o $(OUTDIR) \
 		SampleClient/SampleClient.csproj
-	@echo "→ $(OUTDIR)/SampleClient/"
+	@echo "→ $(OUTDIR)/AsynchronousClient.exe"
 
 # ─── Clean ────────────────────────────────────────────────────────────────────
 
