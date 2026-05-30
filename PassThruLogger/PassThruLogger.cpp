@@ -9,7 +9,12 @@ extern bool loadedFine;
 extern std::unique_ptr<NetworkWriter> writer;
 
 // A quick way to avoid the name mangling that __stdcall liked to do
+// On MSVC: uses linker pragma. On mingw: exports via .def file.
+#ifdef __GNUC__
+#define EXPORT
+#else
 #define EXPORT comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
+#endif
 
 bool writeParamPointer(void* maybe_ptr) {
 	writer->writeByte(wiredatatype::TYPE_POINTER);

@@ -4,10 +4,17 @@
 
 #define DEFAULT_BUFLEN 512
 
+// IPPROTO is an enum type in MSVC but not always available as a type in mingw
+#ifdef __GNUC__
+typedef int IPPROTO_TYPE;
+#else
+typedef IPPROTO IPPROTO_TYPE;
+#endif
+
 class NetworkWriter
 {
 public:
-	NetworkWriter(int ai_family, int ai_socktype, IPPROTO ai_proto);
+	NetworkWriter(int ai_family, int ai_socktype, IPPROTO_TYPE ai_proto);
 	~NetworkWriter();
 
 	bool connect(PCSTR addr, PCSTR port);
@@ -34,7 +41,7 @@ public:
 private:
 	int ai_family;
 	int ai_socktype;
-	IPPROTO ai_proto;
+	IPPROTO_TYPE ai_proto;
 
 	SOCKET s = INVALID_SOCKET;
 	bool connected = false;

@@ -1,0 +1,58 @@
+# PassThruLogger DLL — Cross-compilation with mingw-w64
+# Usage: make -f Makefile.mingw (from project root)
+#    or: make -f Makefile.mingw CC=i686-w64-mingw32-g++
+
+CC ?= i686-w64-mingw32-g++
+WINDRES ?= i686-w64-mingw32-windres
+
+SRCDIR = PassThruLogger
+OUTDIR = build
+TARGET = $(OUTDIR)/PassThruLogger.dll
+
+SOURCES = \
+	$(SRCDIR)/dllmain.cpp \
+	$(SRCDIR)/PassThruLogger.cpp \
+	$(SRCDIR)/Loader4.cpp \
+	$(SRCDIR)/NetworkWriter.cpp \
+	$(SRCDIR)/RegUtils.cpp
+
+CXXFLAGS = \
+	-std=c++14 \
+	-m32 \
+	-shared \
+	-O2 \
+	-DWIN32 \
+	-D_WINDOWS \
+	-D_USRDLL \
+	-DPASSTHRULOGGER_EXPORTS \
+	-DPANDAJ2534DLL_EXPORTS \
+	-DUNICODE \
+	-D_UNICODE \
+	-I$(SRCDIR) \
+	-I. \
+	-Wall \
+	-Wno-unknown-pragmas
+
+LDFLAGS = \
+	-m32 \
+	-shared \
+	-static-libgcc \
+	-static-libstdc++ \
+	-Wl,--kill-at \
+	-Wl,--enable-stdcall-fixup \
+	$(SRCDIR)/PassThruLogger.def \
+	-lws2_32 \
+	-lmswsock \
+	-ladvapi32
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(SOURCES) $(SRCDIR)/PassThruLogger.def
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CXXFLAGS) $(SOURCES) -o $(TARGET) $(LDFLAGS)
+	@echo "Built: $(TARGET)"
+
+clean:
+	rm -rf $(OUTDIR)

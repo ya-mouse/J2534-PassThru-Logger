@@ -6,7 +6,7 @@
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
-NetworkWriter::NetworkWriter(int ai_family, int ai_socktype, IPPROTO ai_proto) {
+NetworkWriter::NetworkWriter(int ai_family, int ai_socktype, IPPROTO_TYPE ai_proto) {
 	this->ai_family = ai_family;
 	this->ai_socktype = ai_socktype;
 	this->ai_proto = ai_proto;

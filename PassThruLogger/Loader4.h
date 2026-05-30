@@ -70,4 +70,4 @@ extern PTREADVERSION LocalReadVersion;
 extern PTGETLASTERROR LocalGetLastError;
 extern PTIOCTL LocalIoctl;
 
-extern HINSTANCE hDLL;
+// hDLL is defined as static in Loader4.cpp — not exposed externally
