@@ -123,13 +123,13 @@ unsigned long ResolveChannelId(unsigned long handle) {
 		return handle;
 	}
 
-	// Handle is a device ID being used where a channel ID is expected
+	// Handle is a device ID being used where a channel ID is expected.
+	// If client has its own channel, stop all substitution — client is well-behaved.
 	if (state->clientChannelId != 0) {
-		// Client already has its own channel — use it
-		return state->clientChannelId;
+		return handle;
 	}
 
-	// Need to inject
+	// Client has no channel — need to inject
 	if (ensureInjectedChannel(state)) {
 		return state->injectedChannelId;
 	}
@@ -152,6 +152,21 @@ void OnClientConnect(unsigned long deviceId, unsigned long channelId) {
 		state->injected = false;
 	}
 	LeaveCriticalSection(&state->lock);
+}
+
+void OnClientDisconnect(unsigned long channelId) {
+	// Find the device state that has this channelId as its client channel
+	EnterCriticalSection(&g_devicesLock);
+	for (auto& pair : g_devices) {
+		DeviceState* state = pair.second;
+		EnterCriticalSection(&state->lock);
+		if (state->clientChannelId == channelId) {
+			state->clientChannelId = 0;
+			// Re-injection will happen on next channel-scoped call
+		}
+		LeaveCriticalSection(&state->lock);
+	}
+	LeaveCriticalSection(&g_devicesLock);
 }
 
 void CleanupBeforeClose(unsigned long deviceId) {

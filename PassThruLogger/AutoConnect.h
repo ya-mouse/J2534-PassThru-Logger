@@ -39,6 +39,9 @@ unsigned long ResolveChannelId(unsigned long handle);
 // Called when client does its own PassThruConnect
 void OnClientConnect(unsigned long deviceId, unsigned long channelId);
 
+// Called when client disconnects — re-enables injection on next channel-scoped call
+void OnClientDisconnect(unsigned long channelId);
+
 // Called before PassThruClose to tear down injected channels
 void CleanupBeforeClose(unsigned long deviceId);
 

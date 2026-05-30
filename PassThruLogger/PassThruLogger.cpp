@@ -152,6 +152,11 @@ PANDAJ2534DLL_API long PTAPI PassThruDisconnect(unsigned long ChannelID) {
 	unsigned long resolvedId = ResolveChannelId(ChannelID);
 	auto res = LocalDisconnect(resolvedId);
 
+	// If client disconnected its own channel, reset state so re-injection can occur
+	if (res == STATUS_NOERROR) {
+		OnClientDisconnect(ChannelID);
+	}
+
 	writeApiMsgHeader(J2534_0404func::API_PassThruDisconnect);
 
 	writeParamInt(ChannelID);
