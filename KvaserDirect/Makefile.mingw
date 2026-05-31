@@ -13,6 +13,7 @@ SOURCES = $(SRCDIR)/dllmain.cpp \
           $(SRCDIR)/CanlibLoader.cpp \
           $(SRCDIR)/HandleManager.cpp \
           $(SRCDIR)/IsoTpEngine.cpp \
+          $(SRCDIR)/Logger.cpp \
           $(SRCDIR)/J2534Api.cpp
 
 OBJECTS = $(SOURCES:.cpp=.o)

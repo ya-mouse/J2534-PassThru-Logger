@@ -29,7 +29,7 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser control sample clean docker-image
+.PHONY: all dll kvaser control sample clean docker-image test-kvaser
 
 all: dll kvaser control sample
 
@@ -78,3 +78,10 @@ sample:
 
 clean:
 	rm -rf build
+
+# ─── KvaserDirect Unit Tests (compile only — run on Windows or with Wine) ────
+
+test-kvaser: docker-image
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f KvaserDirect/tests/Makefile.test
+	@echo "→ build/tests/test_isotp.exe (run on Windows or via Wine)"

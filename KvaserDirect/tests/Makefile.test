@@ -1,0 +1,32 @@
+# KvaserDirect Tests — Cross-compile with mingw-w64, run with Wine
+# Usage: make -f KvaserDirect/tests/Makefile.test
+#   or: docker run --rm -v $(pwd):/src debian:bookworm-slim sh -c \
+#     "apt-get update && apt-get install -y g++-mingw-w64-i686 make wine && make -f KvaserDirect/tests/Makefile.test run"
+
+CC = i686-w64-mingw32-g++
+SRCDIR = KvaserDirect
+TESTDIR = $(SRCDIR)/tests
+OUTDIR = build/tests
+
+CFLAGS = -Wall -std=c++11 -DUNIT_TEST -DWIN32 \
+         -I$(SRCDIR) -Ivendor/canlib/INC -g
+
+LDFLAGS = -static-libgcc -static-libstdc++ -lws2_32 -ladvapi32
+
+TEST_SOURCES = $(TESTDIR)/test_isotp.cpp $(SRCDIR)/IsoTpEngine.cpp
+TEST_TARGET = $(OUTDIR)/test_isotp.exe
+
+.PHONY: all clean run
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SOURCES)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built: $@"
+
+run: $(TEST_TARGET)
+	wine $(TEST_TARGET)
+
+clean:
+	rm -rf $(OUTDIR)

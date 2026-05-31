@@ -2,6 +2,7 @@
 #include "CanlibLoader.h"
 #include "HandleManager.h"
 #include "Config.h"
+#include "Logger.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -51,24 +52,37 @@ static long readVbatt(ChannelState *ch, unsigned long *pOutput) {
 //
 
 KD_API long PTAPI PassThruOpen(void *pName, unsigned long *pDeviceID) {
+    g_logger.apiEntry("PassThruOpen", "name=%s", pName ? (const char*)pName : "NULL");
+
     if (!g_initialized) {
         setLastError("canlib32.dll not loaded");
+        g_logger.apiReturn("PassThruOpen", ERR_DEVICE_NOT_CONNECTED);
         return ERR_DEVICE_NOT_CONNECTED;
     }
     if (!pDeviceID) return ERR_NULL_PARAMETER;
 
     const char *name = (const char *)pName;  // NULL is valid (use default)
-    return g_handleMgr.openDevice(name, pDeviceID);
+    long ret = g_handleMgr.openDevice(name, pDeviceID);
+    g_logger.apiReturn("PassThruOpen", ret);
+    if (ret == STATUS_NOERROR)
+        g_logger.verbose("  DeviceID=%lu", *pDeviceID);
+    return ret;
 }
 
 KD_API long PTAPI PassThruClose(unsigned long DeviceID) {
+    g_logger.apiEntry("PassThruClose", "DeviceID=%lu", DeviceID);
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
-    return g_handleMgr.closeDevice(DeviceID);
+    long ret = g_handleMgr.closeDevice(DeviceID);
+    g_logger.apiReturn("PassThruClose", ret);
+    return ret;
 }
 
 KD_API long PTAPI PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID,
                                    unsigned long Flags, unsigned long BaudRate,
                                    unsigned long *pChannelID) {
+    g_logger.apiEntry("PassThruConnect", "DeviceID=%lu, Proto=0x%lX, Flags=0x%lX, Baud=%lu",
+                      DeviceID, ProtocolID, Flags, BaudRate);
+
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pChannelID) return ERR_NULL_PARAMETER;
 
@@ -77,19 +91,30 @@ KD_API long PTAPI PassThruConnect(unsigned long DeviceID, unsigned long Protocol
         (ProtocolID < J2534_FD_CAN_CH1 || ProtocolID > J2534_FD_CAN_CH1 + 127) &&
         (ProtocolID < J2534_FD_ISO15765_CH1 || ProtocolID > J2534_FD_ISO15765_CH1 + 127)) {
         setLastError("Unsupported protocol 0x%lX (only CAN/ISO15765 supported)", ProtocolID);
+        g_logger.apiReturn("PassThruConnect", ERR_INVALID_PROTOCOL_ID);
         return ERR_INVALID_PROTOCOL_ID;
     }
 
-    return g_handleMgr.openChannel(DeviceID, ProtocolID, Flags, BaudRate, pChannelID);
+    long ret = g_handleMgr.openChannel(DeviceID, ProtocolID, Flags, BaudRate, pChannelID);
+    g_logger.apiReturn("PassThruConnect", ret);
+    if (ret == STATUS_NOERROR)
+        g_logger.verbose("  ChannelID=%lu", *pChannelID);
+    return ret;
 }
 
 KD_API long PTAPI PassThruDisconnect(unsigned long ChannelID) {
+    g_logger.apiEntry("PassThruDisconnect", "ChannelID=%lu", ChannelID);
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
-    return g_handleMgr.closeChannel(ChannelID);
+    long ret = g_handleMgr.closeChannel(ChannelID);
+    g_logger.apiReturn("PassThruDisconnect", ret);
+    return ret;
 }
 
 KD_API long PTAPI PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
                                     unsigned long *pNumMsgs, unsigned long Timeout) {
+    g_logger.apiEntry("PassThruReadMsgs", "Ch=%lu, NumMsgs=%lu, Timeout=%lu",
+                      ChannelID, pNumMsgs ? *pNumMsgs : 0, Timeout);
+
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pMsg || !pNumMsgs) return ERR_NULL_PARAMETER;
 
@@ -154,13 +179,25 @@ KD_API long PTAPI PassThruReadMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
     }
 
     *pNumMsgs = received;
-    if (received == 0) return ERR_BUFFER_EMPTY;
-    if (received < requested) return ERR_TIMEOUT;
-    return STATUS_NOERROR;
+    long ret;
+    if (received == 0) ret = ERR_BUFFER_EMPTY;
+    else if (received < requested) ret = ERR_TIMEOUT;
+    else ret = STATUS_NOERROR;
+
+    g_logger.apiReturn("PassThruReadMsgs", ret);
+    if (ret == STATUS_NOERROR || received > 0) {
+        g_logger.verbose("  received %lu msgs", received);
+        for (unsigned long m = 0; m < received && g_logger.isDebug(); m++)
+            g_logger.hexDump("  RX", pMsg[m].Data, pMsg[m].DataSize);
+    }
+    return ret;
 }
 
 KD_API long PTAPI PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
                                      unsigned long *pNumMsgs, unsigned long Timeout) {
+    g_logger.apiEntry("PassThruWriteMsgs", "Ch=%lu, NumMsgs=%lu, Timeout=%lu",
+                      ChannelID, pNumMsgs ? *pNumMsgs : 0, Timeout);
+
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pMsg || !pNumMsgs) return ERR_NULL_PARAMETER;
 
@@ -222,46 +259,78 @@ KD_API long PTAPI PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
     }
 
     *pNumMsgs = sent;
-    if (sent == 0) return ERR_FAILED;
-    if (sent < count) return ERR_TIMEOUT;
-
-    // Wait for TX completion if timeout specified
-    if (Timeout > 0 && sent > 0) {
-        g_canlib.canWriteSync(ch->canHandle, Timeout);
+    long ret;
+    if (sent == 0) ret = ERR_FAILED;
+    else if (sent < count) ret = ERR_TIMEOUT;
+    else {
+        // Wait for TX completion if timeout specified
+        if (Timeout > 0 && sent > 0)
+            g_canlib.canWriteSync(ch->canHandle, Timeout);
+        ret = STATUS_NOERROR;
     }
 
-    return STATUS_NOERROR;
+    g_logger.apiReturn("PassThruWriteMsgs", ret);
+    if (g_logger.isDebug()) {
+        for (unsigned long m = 0; m < sent; m++)
+            g_logger.hexDump("  TX", pMsg[m].Data, pMsg[m].DataSize);
+    }
+    return ret;
 }
 
 KD_API long PTAPI PassThruStartPeriodicMsg(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
                                             unsigned long *pMsgID, unsigned long TimeInterval) {
+    g_logger.apiEntry("PassThruStartPeriodicMsg", "Ch=%lu, Interval=%lu", ChannelID, TimeInterval);
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pMsg || !pMsgID) return ERR_NULL_PARAMETER;
     if (TimeInterval < 5 || TimeInterval > 65535) return ERR_INVALID_TIME_INTERVAL;
 
-    return g_handleMgr.startPeriodic(ChannelID, pMsg, pMsgID, TimeInterval);
+    long ret = g_handleMgr.startPeriodic(ChannelID, pMsg, pMsgID, TimeInterval);
+    g_logger.apiReturn("PassThruStartPeriodicMsg", ret);
+    return ret;
 }
 
 KD_API long PTAPI PassThruStopPeriodicMsg(unsigned long ChannelID, unsigned long MsgID) {
+    g_logger.apiEntry("PassThruStopPeriodicMsg", "Ch=%lu, MsgID=%lu", ChannelID, MsgID);
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
-    return g_handleMgr.stopPeriodic(ChannelID, MsgID);
+    long ret = g_handleMgr.stopPeriodic(ChannelID, MsgID);
+    g_logger.apiReturn("PassThruStopPeriodicMsg", ret);
+    return ret;
 }
 
 KD_API long PTAPI PassThruStartMsgFilter(unsigned long ChannelID, unsigned long FilterType,
                                           PASSTHRU_MSG *pMaskMsg, PASSTHRU_MSG *pPatternMsg,
                                           PASSTHRU_MSG *pFlowControlMsg, unsigned long *pFilterID) {
+    const char *ftName = (FilterType == PASS_FILTER) ? "PASS" :
+                         (FilterType == BLOCK_FILTER) ? "BLOCK" :
+                         (FilterType == FLOW_CONTROL_FILTER) ? "FLOW_CONTROL" : "?";
+    g_logger.apiEntry("PassThruStartMsgFilter", "Ch=%lu, Type=%s", ChannelID, ftName);
+
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pFilterID) return ERR_NULL_PARAMETER;
     if (FilterType == FLOW_CONTROL_FILTER && !pFlowControlMsg) return ERR_NULL_PARAMETER;
     if (!pMaskMsg || !pPatternMsg) return ERR_NULL_PARAMETER;
 
-    return g_handleMgr.addFilter(ChannelID, FilterType, pMaskMsg, pPatternMsg,
-                                  pFlowControlMsg, pFilterID);
+    long ret = g_handleMgr.addFilter(ChannelID, FilterType, pMaskMsg, pPatternMsg,
+                                      pFlowControlMsg, pFilterID);
+    g_logger.apiReturn("PassThruStartMsgFilter", ret);
+    if (ret == STATUS_NOERROR) {
+        g_logger.verbose("  FilterID=%lu", *pFilterID);
+        if (g_logger.isDebug()) {
+            g_logger.hexDump("  Mask", pMaskMsg->Data, pMaskMsg->DataSize);
+            g_logger.hexDump("  Pattern", pPatternMsg->Data, pPatternMsg->DataSize);
+            if (pFlowControlMsg)
+                g_logger.hexDump("  FlowCtl", pFlowControlMsg->Data, pFlowControlMsg->DataSize);
+        }
+    }
+    return ret;
 }
 
 KD_API long PTAPI PassThruStopMsgFilter(unsigned long ChannelID, unsigned long FilterID) {
+    g_logger.apiEntry("PassThruStopMsgFilter", "Ch=%lu, FilterID=%lu", ChannelID, FilterID);
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
-    return g_handleMgr.removeFilter(ChannelID, FilterID);
+    long ret = g_handleMgr.removeFilter(ChannelID, FilterID);
+    g_logger.apiReturn("PassThruStopMsgFilter", ret);
+    return ret;
 }
 
 KD_API long PTAPI PassThruSetProgrammingVoltage(unsigned long DeviceID,
@@ -305,31 +374,39 @@ KD_API long PTAPI PassThruGetLastError(char *pErrorDescription) {
 
 KD_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned long IoctlID,
                                  void *pInput, void *pOutput) {
+    g_logger.apiEntry("PassThruIoctl", "Ch=%lu, IoctlID=0x%lX", ChannelID, IoctlID);
+
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
 
     ChannelState *ch = g_handleMgr.getChannel(ChannelID);
     if (!ch) return ERR_INVALID_CHANNEL_ID;
 
+    long ret;
     switch (IoctlID) {
     case READ_VBATT:
-        return readVbatt(ch, (unsigned long *)pOutput);
+        ret = readVbatt(ch, (unsigned long *)pOutput);
+        if (ret == STATUS_NOERROR)
+            g_logger.verbose("  VBATT=%lu mV", *(unsigned long *)pOutput);
+        g_logger.apiReturn("PassThruIoctl/READ_VBATT", ret);
+        return ret;
 
     case CLEAR_TX_BUFFER:
         g_canlib.canIoCtl(ch->canHandle, canIOCTL_FLUSH_TX_BUFFER, NULL, 0);
+        g_logger.verbose("  CLEAR_TX_BUFFER");
         return STATUS_NOERROR;
 
     case CLEAR_RX_BUFFER:
         g_canlib.canIoCtl(ch->canHandle, canIOCTL_FLUSH_RX_BUFFER, NULL, 0);
+        g_logger.verbose("  CLEAR_RX_BUFFER");
         return STATUS_NOERROR;
 
     case CLEAR_MSG_FILTERS:
-        // Clear all filters for this channel
         for (int i = 0; i < MAX_FILTERS; i++)
             ch->filters[i].active = false;
+        g_logger.verbose("  CLEAR_MSG_FILTERS");
         return STATUS_NOERROR;
 
     case CLEAR_PERIODIC_MSGS:
-        // Stop all periodic messages for this channel
         for (int i = 0; i < MAX_PERIODIC; i++) {
             if (ch->periodic[i].active) {
                 if (ch->periodic[i].timerHandle)
@@ -337,6 +414,7 @@ KD_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned long IoctlID,
                 ch->periodic[i].active = false;
             }
         }
+        g_logger.verbose("  CLEAR_PERIODIC_MSGS");
         return STATUS_NOERROR;
 
     case GET_CONFIG: {

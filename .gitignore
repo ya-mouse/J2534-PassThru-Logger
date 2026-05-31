@@ -311,3 +311,7 @@ __pycache__/
 # installer
 *.exe
 build/
+
+# Object files from cross-compilation
+*.o
+*.d
