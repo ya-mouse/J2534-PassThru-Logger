@@ -31,7 +31,7 @@ HandleManager::HandleManager() {
     InitializeCriticalSection(&lock_);
     memset(devices_, 0, sizeof(devices_));
     memset(channels_, 0, sizeof(channels_));
-    nextDeviceId_ = 1;
+    nextDeviceId_ = 1232;
     nextChannelId_ = 1;
 }
 
