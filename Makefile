@@ -29,9 +29,9 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll control sample clean docker-image
+.PHONY: all dll kvaser control sample clean docker-image
 
-all: dll control sample
+all: dll kvaser control sample
 
 # ─── C++ DLL (Docker + mingw-w64) ────────────────────────────────────────────
 
@@ -43,6 +43,16 @@ dll: docker-image
 		OUTDIR=$(OUTDIR) \
 		EXTRA_CXXFLAGS="$(MINGW_OPT)"
 	@echo "→ $(OUTDIR)/PassThruLogger.dll"
+
+# ─── KvaserDirect DLL (Docker + mingw-w64) ───────────────────────────────────
+
+kvaser: docker-image
+	@mkdir -p $(OUTDIR)
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f KvaserDirect/Makefile.mingw \
+		OUTDIR=$(OUTDIR) \
+		EXTRA_CXXFLAGS="$(MINGW_OPT)"
+	@echo "→ $(OUTDIR)/KvaserDirect.dll"
 
 docker-image:
 	@docker inspect $(DOCKER_IMAGE) >/dev/null 2>&1 || \
