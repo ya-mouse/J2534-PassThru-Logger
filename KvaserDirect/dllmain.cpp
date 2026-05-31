@@ -53,11 +53,31 @@ static void loadConfig() {
     g_config.logFormat = 0;
     g_config.defaultBaudRate = 500000;
 
+    // First, try HKLM PassThru key for Kvaser-compatible settings
+    // (same key names as original Kvaser j2534api.dll)
     HKEY key;
+    static const char *hklmPaths[] = {
+        "SOFTWARE\\WOW6432Node\\PassThruSupport.04.04\\KvaserDirect",
+        "SOFTWARE\\PassThruSupport.04.04\\KvaserDirect",
+        NULL
+    };
+    for (int i = 0; hklmPaths[i]; i++) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, hklmPaths[i], 0, KEY_READ, &key) == ERROR_SUCCESS) {
+            // "CAN channel" is 1-based in Kvaser convention (1 → canlib channel 0)
+            DWORD canCh = readRegDword(key, "CAN channel", 1);
+            if (canCh > 0) g_config.canlibChannel = (int)(canCh - 1);
+            g_config.shareCanlibChannels = (int)readRegDword(key, "share canlib channels", 0);
+            g_config.acceptVirtualChannels = (int)readRegDword(key, "canOPEN_ACCEPT_VIRTUAL", 0);
+            RegCloseKey(key);
+            break;
+        }
+    }
+
+    // Then, HKCU settings override (our extended config)
     if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\KvaserDirect", 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        g_config.canlibChannel       = (int)readRegDword(key, "CanlibChannel", 0);
-        g_config.shareCanlibChannels = (int)readRegDword(key, "ShareCanlibChannels", 0);
-        g_config.acceptVirtualChannels = (int)readRegDword(key, "AcceptVirtualChannels", 0);
+        g_config.canlibChannel       = (int)readRegDword(key, "CanlibChannel", (DWORD)g_config.canlibChannel);
+        g_config.shareCanlibChannels = (int)readRegDword(key, "ShareCanlibChannels", (DWORD)g_config.shareCanlibChannels);
+        g_config.acceptVirtualChannels = (int)readRegDword(key, "AcceptVirtualChannels", (DWORD)g_config.acceptVirtualChannels);
         g_config.vbattSource         = (int)readRegDword(key, "VbattSource", 2);
         g_config.vbattIoPin          = (int)readRegDword(key, "VbattIoPin", 0);
         g_config.mockVbattMv         = readRegDword(key, "MockVbattMv", 12000);

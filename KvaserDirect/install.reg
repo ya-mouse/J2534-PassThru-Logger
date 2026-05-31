@@ -5,68 +5,98 @@ Windows Registry Editor Version 5.00
 ;
 ; IMPORTANT: Edit the paths below to match your installation directory.
 ; Run this file as Administrator (right-click → Merge).
+;
+; Note: WOW6432Node is required because J2534 DLLs are 32-bit,
+; and 32-bit apps on 64-bit Windows read from this registry branch.
 
-[HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04\KvaserDirect]
+; ═══════════════════════════════════════════════════════════════════════
+; PassThru driver registration (64-bit Windows — WOW6432Node)
+; ═══════════════════════════════════════════════════════════════════════
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\PassThruSupport.04.04\KvaserDirect]
 "Vendor"="KvaserDirect"
-"Name"="KvaserDirect (CANlib)"
-"FunctionLibrary"="C:\\Program Files (x86)\\KvaserDirect\\KvaserDirect.dll"
-"ConfigApplication"="C:\\Program Files (x86)\\KvaserDirect\\PassThruLoggerControl.exe"
+"Name"="KvaserDirect (CANlib-based)"
+"FunctionLibrary"="C:\\Program Files\\KvaserDirect\\KvaserDirect.dll"
+"ConfigApplication"="C:\\Program Files\\KvaserDirect\\PassThruLoggerControl.exe"
 
 ; Supported protocols (1 = supported, 0 = not supported)
 "CAN"=dword:00000001
 "ISO15765"=dword:00000001
-"CAN_PS"=dword:00000001
-"ISO15765_PS"=dword:00000001
 
 ; Not supported (no K-line on standard Kvaser USB interfaces)
 "ISO9141"=dword:00000000
-"ISO9141_PS"=dword:00000000
 "ISO14230"=dword:00000000
-"ISO14230_PS"=dword:00000000
 "J1850VPW"=dword:00000000
-"J1850VPW_PS"=dword:00000000
 "J1850PWM"=dword:00000000
-"J1850PWM_PS"=dword:00000000
 "SCI_A_ENGINE"=dword:00000000
 "SCI_A_TRANS"=dword:00000000
 "SCI_B_ENGINE"=dword:00000000
 "SCI_B_TRANS"=dword:00000000
-"SW_CAN_PS"=dword:00000000
-"SW_ISO15765_PS"=dword:00000000
+
+; Kvaser-compatible settings (read by our DLL)
+"CAN channel"=dword:00000001
+"canOPEN_ACCEPT_VIRTUAL"=dword:00000000
+"share canlib channels"=dword:00000000
 
 ; ═══════════════════════════════════════════════════════════════════════
-; KvaserDirect configuration settings
+; PassThru driver registration (32-bit Windows — native path)
+; ═══════════════════════════════════════════════════════════════════════
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04\KvaserDirect]
+"Vendor"="KvaserDirect"
+"Name"="KvaserDirect (CANlib-based)"
+"FunctionLibrary"="C:\\Program Files\\KvaserDirect\\KvaserDirect.dll"
+"ConfigApplication"="C:\\Program Files\\KvaserDirect\\PassThruLoggerControl.exe"
+
+"CAN"=dword:00000001
+"ISO15765"=dword:00000001
+"ISO9141"=dword:00000000
+"ISO14230"=dword:00000000
+"J1850VPW"=dword:00000000
+"J1850PWM"=dword:00000000
+"SCI_A_ENGINE"=dword:00000000
+"SCI_A_TRANS"=dword:00000000
+"SCI_B_ENGINE"=dword:00000000
+"SCI_B_TRANS"=dword:00000000
+
+"CAN channel"=dword:00000001
+"canOPEN_ACCEPT_VIRTUAL"=dword:00000000
+"share canlib channels"=dword:00000000
+
+; ═══════════════════════════════════════════════════════════════════════
+; KvaserDirect configuration (per-user settings)
 ; ═══════════════════════════════════════════════════════════════════════
 
 [HKEY_CURRENT_USER\SOFTWARE\KvaserDirect]
 
 ; CANlib channel number (0-based, matches Kvaser hardware enumeration)
-; Use Kvaser Hardware utility or "canGetNumberOfChannels" to find yours.
-; CAN_CH1 in J2534 maps to CANlib channel 0, CAN_CH2 → channel 1, etc.
+; Use kvio_enum.exe or Kvaser Hardware utility to discover channels.
+; Note: "CAN channel" above is 1-based (Kvaser convention); this is 0-based.
 "CanlibChannel"=dword:00000000
 
 ; VBATT configuration
 ; VbattSource: 0=mock (always return MockVbattMv), 1=kvIo (read analog pin),
 ;              2=auto (try kvIo first, fall back to mock)
 "VbattSource"=dword:00000002
-; Pin index for kvIoPinGetAnalog() — device-dependent
+; Pin index for kvIoPinGetAnalog() — use kvio_enum.exe to find the right pin
 "VbattIoPin"=dword:00000000
 ; Mock voltage in millivolts (12000 = 12.0V typical car battery)
 "MockVbattMv"=dword:00002EE0
 
 ; Logging (optional file logging from the DLL itself)
-"LogEnabled"=dword:00000000
+; LogLevel: 0=off, 1=verbose (API calls), 2=debug (+ hex dumps)
+"LogLevel"=dword:00000000
 "LogFilePath"=""
 ; LogFormat: 0=text, 1=json
 "LogFormat"=dword:00000000
 
 ; CAN channel sharing (same as stock Kvaser j2534api.dll)
-; 0 = use canOPEN_REQUIRE_INIT_ACCESS (exclusive, guarantees bitrate control)
-; 1 = share channel with other apps (no init access check)
+; 0 = exclusive (canOPEN_REQUIRE_INIT_ACCESS, guarantees bitrate control)
+; 1 = share channel with other apps (matches "share canlib channels" above)
 "ShareCanlibChannels"=dword:00000000
 
 ; Accept virtual CANlib channels (for testing without hardware)
 "AcceptVirtualChannels"=dword:00000000
 
-; Default baud rate hint (used if J2534 app doesn't specify)
+; Default baud rate (500000 = 500kbps, standard OBD-II CAN)
 "DefaultBaudRate"=dword:0007A120
