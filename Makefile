@@ -29,7 +29,7 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser control sample clean docker-image test-kvaser
+.PHONY: all dll kvaser control sample clean docker-image test-kvaser tools-kvaser
 
 all: dll kvaser control sample
 
@@ -86,3 +86,10 @@ test-kvaser: docker-image
 	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
 		make -f KvaserDirect/tests/Makefile.test
 	@echo "→ build/tests/test_isotp.exe (run on Windows or via Wine)"
+
+# ─── KvaserDirect Tools (pin enumerator, etc.) ───────────────────────────────
+
+tools-kvaser: docker-image
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f KvaserDirect/tools/Makefile.tools
+	@echo "→ build/tools/kvio_enum.exe"

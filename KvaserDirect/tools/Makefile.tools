@@ -1,0 +1,23 @@
+# KvaserDirect Tools — Cross-compile with mingw-w64
+# Usage: make -f KvaserDirect/tools/Makefile.tools
+#   or via top-level: make tools-kvaser
+
+CC = i686-w64-mingw32-g++
+SRCDIR = KvaserDirect/tools
+OUTDIR = build/tools
+
+CFLAGS = -Wall -std=c++11 -DWIN32 -O2 -static-libgcc -static-libstdc++
+
+TARGETS = $(OUTDIR)/kvio_enum.exe
+
+.PHONY: all clean
+
+all: $(TARGETS)
+
+$(OUTDIR)/kvio_enum.exe: $(SRCDIR)/kvio_enum.cpp
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $<
+	@echo "Built: $@"
+
+clean:
+	rm -rf $(OUTDIR)
