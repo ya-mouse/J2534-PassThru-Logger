@@ -1,0 +1,41 @@
+# KvaserDirect — Cross-compile with mingw-w64 (i686, 32-bit)
+# Build: docker run --rm -v $(pwd):/src -w /src debian:bookworm-slim sh -c \
+#   "apt-get update && apt-get install -y g++-mingw-w64-i686 make && make -f KvaserDirect/Makefile.mingw"
+
+CC = i686-w64-mingw32-g++
+WINDRES = i686-w64-mingw32-windres
+
+SRCDIR = KvaserDirect
+OUTDIR = build/Release
+
+SOURCES = $(SRCDIR)/dllmain.cpp \
+          $(SRCDIR)/CanlibLoader.cpp \
+          $(SRCDIR)/HandleManager.cpp \
+          $(SRCDIR)/IsoTpEngine.cpp \
+          $(SRCDIR)/J2534Api.cpp
+
+OBJECTS = $(SOURCES:.cpp=.o)
+
+TARGET = $(OUTDIR)/KvaserDirect.dll
+
+CFLAGS = -Wall -O2 -std=c++11 -DKVASERDIRECT_EXPORTS -DWIN32 \
+         -I$(SRCDIR) -I vendor/canlib/INC
+LDFLAGS = -shared -static-libgcc -static-libstdc++ \
+          -Wl,--kill-at,--enable-stdcall-fixup \
+          $(SRCDIR)/exports.def \
+          -lws2_32 -ladvapi32
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built: $@"
+
+%.o: %.cpp
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJECTS) $(TARGET)
