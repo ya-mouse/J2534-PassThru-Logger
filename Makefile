@@ -52,7 +52,8 @@ kvaser: docker-image
 		make -f KvaserDirect/Makefile.mingw \
 		OUTDIR=$(OUTDIR) \
 		EXTRA_CXXFLAGS="$(MINGW_OPT)"
-	@echo "→ $(OUTDIR)/KvaserDirect.dll"
+	@cp KvaserDirect/install.reg KvaserDirect/uninstall.reg $(OUTDIR)/
+	@echo "→ $(OUTDIR)/KvaserDirect.dll + install.reg + uninstall.reg"
 
 docker-image:
 	@docker inspect $(DOCKER_IMAGE) >/dev/null 2>&1 || \
