@@ -57,6 +57,13 @@ namespace PassThruLoggerControl
             this.autoInjectCheckBox = new System.Windows.Forms.CheckBox();
             this.labelMockVbatt = new System.Windows.Forms.Label();
             this.mockVbattTextBox = new System.Windows.Forms.TextBox();
+            this.labelLogFilePath = new System.Windows.Forms.Label();
+            this.logFilePathTextBox = new System.Windows.Forms.TextBox();
+            this.labelLogFormat = new System.Windows.Forms.Label();
+            this.logFormatCombo = new System.Windows.Forms.ComboBox();
+            this.labelBufferSize = new System.Windows.Forms.Label();
+            this.bufferSizeTextBox = new System.Windows.Forms.TextBox();
+            this.saveSettingsButton = new System.Windows.Forms.Button();
             this.iDDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.statusDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.eventCountDataGridViewTextBoxColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -94,7 +101,7 @@ namespace PassThruLoggerControl
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel1.Size = new System.Drawing.Size(870, 500);
+            this.tableLayoutPanel1.Size = new System.Drawing.Size(870, 580);
             this.tableLayoutPanel1.TabIndex = 7;
             // 
             // splitContainer1
@@ -239,7 +246,7 @@ namespace PassThruLoggerControl
             this.settingsGroup.Dock = System.Windows.Forms.DockStyle.Fill;
             this.settingsGroup.Location = new System.Drawing.Point(3, 341);
             this.settingsGroup.Name = "settingsGroup";
-            this.settingsGroup.Size = new System.Drawing.Size(864, 156);
+            this.settingsGroup.Size = new System.Drawing.Size(864, 200);
             this.settingsGroup.TabIndex = 11;
             this.settingsGroup.TabStop = false;
             this.settingsGroup.Text = "Auto-Connect Settings (stored in Registry)";
@@ -262,14 +269,23 @@ namespace PassThruLoggerControl
             this.settingsLayout.Controls.Add(this.autoInjectCheckBox, 0, 2);
             this.settingsLayout.Controls.Add(this.labelMockVbatt, 2, 2);
             this.settingsLayout.Controls.Add(this.mockVbattTextBox, 3, 2);
+            this.settingsLayout.Controls.Add(this.labelLogFilePath, 0, 3);
+            this.settingsLayout.Controls.Add(this.logFilePathTextBox, 1, 3);
+            this.settingsLayout.Controls.Add(this.labelLogFormat, 2, 3);
+            this.settingsLayout.Controls.Add(this.logFormatCombo, 3, 3);
+            this.settingsLayout.Controls.Add(this.labelBufferSize, 0, 4);
+            this.settingsLayout.Controls.Add(this.bufferSizeTextBox, 1, 4);
+            this.settingsLayout.Controls.Add(this.saveSettingsButton, 3, 4);
             this.settingsLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.settingsLayout.Location = new System.Drawing.Point(3, 18);
             this.settingsLayout.Name = "settingsLayout";
-            this.settingsLayout.RowCount = 3;
+            this.settingsLayout.RowCount = 5;
             this.settingsLayout.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.settingsLayout.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.settingsLayout.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.settingsLayout.Size = new System.Drawing.Size(858, 135);
+            this.settingsLayout.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.settingsLayout.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.settingsLayout.Size = new System.Drawing.Size(858, 180);
             this.settingsLayout.TabIndex = 0;
             // 
             // labelProtocol
@@ -292,7 +308,6 @@ namespace PassThruLoggerControl
             this.protocolCombo.Name = "protocolCombo";
             this.protocolCombo.Size = new System.Drawing.Size(330, 24);
             this.protocolCombo.TabIndex = 1;
-            this.protocolCombo.SelectedIndexChanged += new System.EventHandler(this.protocolCombo_SelectedIndexChanged);
             // 
             // labelBaudRate
             // 
@@ -313,7 +328,6 @@ namespace PassThruLoggerControl
             this.baudRateCombo.Name = "baudRateCombo";
             this.baudRateCombo.Size = new System.Drawing.Size(344, 24);
             this.baudRateCombo.TabIndex = 3;
-            this.baudRateCombo.TextChanged += new System.EventHandler(this.baudRateCombo_TextChanged);
             // 
             // labelFlags
             // 
@@ -334,7 +348,6 @@ namespace PassThruLoggerControl
             this.flagsTextBox.Size = new System.Drawing.Size(330, 22);
             this.flagsTextBox.TabIndex = 5;
             this.flagsTextBox.Text = "0";
-            this.flagsTextBox.TextChanged += new System.EventHandler(this.flagsTextBox_TextChanged);
             // 
             // labelDeviceName
             // 
@@ -354,7 +367,6 @@ namespace PassThruLoggerControl
             this.deviceNameTextBox.Name = "deviceNameTextBox";
             this.deviceNameTextBox.Size = new System.Drawing.Size(344, 22);
             this.deviceNameTextBox.TabIndex = 7;
-            this.deviceNameTextBox.TextChanged += new System.EventHandler(this.deviceNameTextBox_TextChanged);
             // 
             // autoInjectCheckBox
             // 
@@ -366,9 +378,8 @@ namespace PassThruLoggerControl
             this.autoInjectCheckBox.Name = "autoInjectCheckBox";
             this.autoInjectCheckBox.Size = new System.Drawing.Size(300, 21);
             this.autoInjectCheckBox.TabIndex = 8;
-            this.autoInjectCheckBox.Text = "Auto-inject PassThruConnect on channel-scoped calls";
+            this.autoInjectCheckBox.Text = "Auto-inject PassThruConnect for VBATT ioctl";
             this.autoInjectCheckBox.UseVisualStyleBackColor = true;
-            this.autoInjectCheckBox.CheckedChanged += new System.EventHandler(this.autoInjectCheckBox_CheckedChanged);
             // 
             // labelMockVbatt
             // 
@@ -389,7 +400,77 @@ namespace PassThruLoggerControl
             this.mockVbattTextBox.Size = new System.Drawing.Size(344, 22);
             this.mockVbattTextBox.TabIndex = 10;
             this.mockVbattTextBox.Text = "0.0";
-            this.mockVbattTextBox.TextChanged += new System.EventHandler(this.mockVbattTextBox_TextChanged);
+            // 
+            // labelLogFilePath
+            // 
+            this.labelLogFilePath.AutoSize = true;
+            this.labelLogFilePath.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.labelLogFilePath.Location = new System.Drawing.Point(3, 97);
+            this.labelLogFilePath.Margin = new System.Windows.Forms.Padding(3, 7, 3, 0);
+            this.labelLogFilePath.Name = "labelLogFilePath";
+            this.labelLogFilePath.Size = new System.Drawing.Size(80, 23);
+            this.labelLogFilePath.TabIndex = 11;
+            this.labelLogFilePath.Text = "Log File:";
+            // 
+            // logFilePathTextBox
+            // 
+            this.logFilePathTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.logFilePathTextBox.Location = new System.Drawing.Point(89, 93);
+            this.logFilePathTextBox.Name = "logFilePathTextBox";
+            this.logFilePathTextBox.Size = new System.Drawing.Size(330, 22);
+            this.logFilePathTextBox.TabIndex = 12;
+            // 
+            // labelLogFormat
+            // 
+            this.labelLogFormat.AutoSize = true;
+            this.labelLogFormat.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.labelLogFormat.Location = new System.Drawing.Point(425, 97);
+            this.labelLogFormat.Margin = new System.Windows.Forms.Padding(3, 7, 3, 0);
+            this.labelLogFormat.Name = "labelLogFormat";
+            this.labelLogFormat.Size = new System.Drawing.Size(80, 23);
+            this.labelLogFormat.TabIndex = 13;
+            this.labelLogFormat.Text = "Log Format:";
+            // 
+            // logFormatCombo
+            // 
+            this.logFormatCombo.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.logFormatCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.logFormatCombo.FormattingEnabled = true;
+            this.logFormatCombo.Location = new System.Drawing.Point(511, 93);
+            this.logFormatCombo.Name = "logFormatCombo";
+            this.logFormatCombo.Size = new System.Drawing.Size(344, 24);
+            this.logFormatCombo.TabIndex = 14;
+            // 
+            // labelBufferSize
+            // 
+            this.labelBufferSize.AutoSize = true;
+            this.labelBufferSize.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.labelBufferSize.Location = new System.Drawing.Point(3, 127);
+            this.labelBufferSize.Margin = new System.Windows.Forms.Padding(3, 7, 3, 0);
+            this.labelBufferSize.Name = "labelBufferSize";
+            this.labelBufferSize.Size = new System.Drawing.Size(80, 23);
+            this.labelBufferSize.TabIndex = 15;
+            this.labelBufferSize.Text = "Buffer Size:";
+            // 
+            // bufferSizeTextBox
+            // 
+            this.bufferSizeTextBox.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.bufferSizeTextBox.Location = new System.Drawing.Point(89, 123);
+            this.bufferSizeTextBox.Name = "bufferSizeTextBox";
+            this.bufferSizeTextBox.Size = new System.Drawing.Size(330, 22);
+            this.bufferSizeTextBox.TabIndex = 16;
+            this.bufferSizeTextBox.Text = "4096";
+            // 
+            // saveSettingsButton
+            // 
+            this.saveSettingsButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.saveSettingsButton.Location = new System.Drawing.Point(511, 123);
+            this.saveSettingsButton.Name = "saveSettingsButton";
+            this.saveSettingsButton.Size = new System.Drawing.Size(344, 28);
+            this.saveSettingsButton.TabIndex = 17;
+            this.saveSettingsButton.Text = "Save Settings";
+            this.saveSettingsButton.UseVisualStyleBackColor = true;
+            this.saveSettingsButton.Click += new System.EventHandler(this.saveSettingsButton_Click);
             // 
             // iDDataGridViewTextBoxColumn
             // 
@@ -439,7 +520,7 @@ namespace PassThruLoggerControl
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(870, 500);
+            this.ClientSize = new System.Drawing.Size(870, 580);
             this.Controls.Add(this.tableLayoutPanel1);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "J2534LogController";
@@ -492,6 +573,13 @@ namespace PassThruLoggerControl
         private CheckBox autoInjectCheckBox;
         private Label labelMockVbatt;
         private TextBox mockVbattTextBox;
+        private Label labelLogFilePath;
+        private TextBox logFilePathTextBox;
+        private Label labelLogFormat;
+        private ComboBox logFormatCombo;
+        private Label labelBufferSize;
+        private TextBox bufferSizeTextBox;
+        private Button saveSettingsButton;
     }
 }
 

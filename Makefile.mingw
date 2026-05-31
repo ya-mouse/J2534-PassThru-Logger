@@ -15,7 +15,9 @@ SOURCES = \
 	$(SRCDIR)/Loader4.cpp \
 	$(SRCDIR)/NetworkWriter.cpp \
 	$(SRCDIR)/RegUtils.cpp \
-	$(SRCDIR)/AutoConnect.cpp
+	$(SRCDIR)/AutoConnect.cpp \
+	$(SRCDIR)/EventRingBuffer.cpp \
+	$(SRCDIR)/FileLogger.cpp
 
 EXTRA_CXXFLAGS ?= -O2
 

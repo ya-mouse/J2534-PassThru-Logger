@@ -64,6 +64,11 @@ namespace PassThruLoggerControl
             foreach (var b in BaudRates)
                 baudRateCombo.Items.Add(b);
 
+            // Populate log format combo
+            logFormatCombo.Items.Add("Text");
+            logFormatCombo.Items.Add("JSON");
+            logFormatCombo.SelectedIndex = 0;
+
             RegistryHelper.ScanDrivers(drivers);
             defaultdriver.DataSource = drivers;
 
@@ -161,16 +166,20 @@ namespace PassThruLoggerControl
             var vbattVal = regKey.GetValue("MockVbattMv");
             uint vbattMv = (vbattVal is int vv) ? (uint)vv : 0;
             mockVbattTextBox.Text = (vbattMv / 1000.0).ToString("F1");
-        }
 
-        private void SaveConnectSetting(string name, object value, RegistryValueKind kind)
-        {
-            if (!initDone) return;
-            using (var reg32 = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32))
-            using (var entry = reg32.CreateSubKey(@"Software\Passthru Logger"))
-            {
-                entry.SetValue(name, value, kind);
-            }
+            // Log file path
+            var logPath = regKey.GetValue("LogFilePath") as string ?? "";
+            logFilePathTextBox.Text = logPath;
+
+            // Log format
+            var logFmt = regKey.GetValue("LogFormat");
+            int format = (logFmt is int lf) ? lf : 0;
+            logFormatCombo.SelectedIndex = (format >= 0 && format < logFormatCombo.Items.Count) ? format : 0;
+
+            // Buffer size
+            var bufVal = regKey.GetValue("EventBufferSize");
+            uint bufSize = (bufVal is int bs) ? (uint)bs : 4096;
+            bufferSizeTextBox.Text = bufSize.ToString();
         }
 
         /////////////////////// Server setup functions
@@ -355,50 +364,52 @@ namespace PassThruLoggerControl
             }
         }
 
-        /////////////////////// Settings change handlers
-        private void protocolCombo_SelectedIndexChanged(object sender, EventArgs e)
+        /////////////////////// Settings — explicit Save
+        private void saveSettingsButton_Click(object sender, EventArgs e)
         {
-            if (!initDone || protocolCombo.SelectedIndex < 0) return;
-            uint val = Protocols[protocolCombo.SelectedIndex].Value;
-            SaveConnectSetting("ConnectProtocolID", (int)val, RegistryValueKind.DWord);
-        }
-
-        private void baudRateCombo_TextChanged(object sender, EventArgs e)
-        {
-            if (!initDone) return;
-            if (uint.TryParse(baudRateCombo.Text, out uint val))
-                SaveConnectSetting("ConnectBaudRate", (int)val, RegistryValueKind.DWord);
-        }
-
-        private void flagsTextBox_TextChanged(object sender, EventArgs e)
-        {
-            if (!initDone) return;
-            if (uint.TryParse(flagsTextBox.Text, out uint val))
-                SaveConnectSetting("ConnectFlags", (int)val, RegistryValueKind.DWord);
-        }
-
-        private void deviceNameTextBox_TextChanged(object sender, EventArgs e)
-        {
-            if (!initDone) return;
-            SaveConnectSetting("DeviceName", deviceNameTextBox.Text, RegistryValueKind.String);
-        }
-
-        private void autoInjectCheckBox_CheckedChanged(object sender, EventArgs e)
-        {
-            if (!initDone) return;
-            SaveConnectSetting("AutoInjectConnect", autoInjectCheckBox.Checked ? 1 : 0, RegistryValueKind.DWord);
-        }
-
-        private void mockVbattTextBox_TextChanged(object sender, EventArgs e)
-        {
-            if (!initDone) return;
-            if (float.TryParse(mockVbattTextBox.Text, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out float volts))
+            using (var reg32 = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32))
+            using (var entry = reg32.CreateSubKey(@"Software\Passthru Logger"))
             {
-                int millivolts = (int)(volts * 1000.0f);
-                if (millivolts >= 0)
-                    SaveConnectSetting("MockVbattMv", millivolts, RegistryValueKind.DWord);
+                // Protocol
+                if (protocolCombo.SelectedIndex >= 0)
+                    entry.SetValue("ConnectProtocolID", (int)Protocols[protocolCombo.SelectedIndex].Value, RegistryValueKind.DWord);
+
+                // Baud rate
+                if (uint.TryParse(baudRateCombo.Text, out uint baudVal))
+                    entry.SetValue("ConnectBaudRate", (int)baudVal, RegistryValueKind.DWord);
+
+                // Flags
+                if (uint.TryParse(flagsTextBox.Text, out uint flagsVal))
+                    entry.SetValue("ConnectFlags", (int)flagsVal, RegistryValueKind.DWord);
+
+                // Device name
+                entry.SetValue("DeviceName", deviceNameTextBox.Text, RegistryValueKind.String);
+
+                // Auto-inject
+                entry.SetValue("AutoInjectConnect", autoInjectCheckBox.Checked ? 1 : 0, RegistryValueKind.DWord);
+
+                // Mock VBATT
+                if (float.TryParse(mockVbattTextBox.Text, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float volts))
+                {
+                    int millivolts = (int)(volts * 1000.0f);
+                    if (millivolts >= 0)
+                        entry.SetValue("MockVbattMv", millivolts, RegistryValueKind.DWord);
+                }
+
+                // Log file path
+                entry.SetValue("LogFilePath", logFilePathTextBox.Text, RegistryValueKind.String);
+
+                // Log format (0=text, 1=json)
+                entry.SetValue("LogFormat", logFormatCombo.SelectedIndex >= 0 ? logFormatCombo.SelectedIndex : 0, RegistryValueKind.DWord);
+
+                // Event buffer size
+                if (uint.TryParse(bufferSizeTextBox.Text, out uint bufSize) && bufSize > 0)
+                    entry.SetValue("EventBufferSize", (int)bufSize, RegistryValueKind.DWord);
             }
+
+            MessageBox.Show("Settings saved. DLL will use new settings on next load.",
+                "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }

@@ -231,15 +231,62 @@ namespace PassThruLoggerControl
             thread.Start();
         }
 
-        internal void saveLog(string fileName)
+        internal void close()
+        {
+            closed = true;
+            state = CONNSTATE.Disconnected;
+            socket.Close();
+        }
+
+        public void flushLog()
         {
             logWriter.Flush();
-            try
+        }
+
+        public void saveLogEntry(string entry)
+        {
+            logWriter.WriteLine(entry);
+
+            // Deduplication: if same text as last entry, increment count
+            if (structuredLog.Count > 0)
             {
-                File.Delete(fileName);
+                var last = structuredLog[structuredLog.Count - 1];
+                if (last.Text == entry)
+                {
+                    last.RepeatCount++;
+                    // Don't add to preview again for repeated calls
+                    return;
+                }
             }
-            catch (Exception) { }
-            File.Copy(tmpLogPath, fileName);
+
+            structuredLog.Add(new LogEntry
+            {
+                Timestamp = DateTime.UtcNow,
+                Text = entry,
+                Index = EventCount,
+                RepeatCount = 1
+            });
+
+            string[] lines = entry.Split('\n');
+            form.addLinesToLogPreview(this, lines);
+            foreach (string line in lines)
+                logPreviewEntries.AddLast(entry);
+            while (logPreviewEntries.Count > maxLogPreviewEntryCount)
+                logPreviewEntries.RemoveFirst();
+        }
+
+        internal void saveLog(string fileName)
+        {
+            // Write dedup-aware text log
+            using (var writer = new StreamWriter(fileName, false, Encoding.UTF8))
+            {
+                foreach (var entry in structuredLog)
+                {
+                    writer.WriteLine(entry.Text);
+                    if (entry.RepeatCount > 1)
+                        writer.WriteLine($"    ... repeated {entry.RepeatCount} times");
+                }
+            }
         }
 
         internal void saveLogJson(string fileName)
@@ -257,42 +304,17 @@ namespace PassThruLoggerControl
                 driver = Driver,
                 status = state.ToString(),
                 eventCount = EventCount,
-                entries = structuredLog
+                entries = structuredLog.ConvertAll(e => new
+                {
+                    timestamp = e.Timestamp,
+                    text = e.Text,
+                    index = e.Index,
+                    count = e.RepeatCount
+                })
             };
 
             string json = JsonSerializer.Serialize(export, options);
             File.WriteAllText(fileName, json);
-        }
-
-        internal void close()
-        {
-            closed = true;
-            state = CONNSTATE.Disconnected;
-            socket.Close();
-        }
-
-        public void flushLog()
-        {
-            logWriter.Flush();
-        }
-
-        public void saveLogEntry(string entry)
-        {
-            logWriter.WriteLine(entry);
-
-            structuredLog.Add(new LogEntry
-            {
-                Timestamp = DateTime.UtcNow,
-                Text = entry,
-                Index = EventCount
-            });
-
-            string[] lines = entry.Split('\n');
-            form.addLinesToLogPreview(this, lines);
-            foreach (string line in lines)
-                logPreviewEntries.AddLast(entry);
-            while (logPreviewEntries.Count > maxLogPreviewEntryCount)
-                logPreviewEntries.RemoveFirst();
         }
     }
 
@@ -301,5 +323,6 @@ namespace PassThruLoggerControl
         public DateTime Timestamp { get; set; }
         public string Text { get; set; }
         public int Index { get; set; }
+        public int RepeatCount { get; set; }
     }
 }
