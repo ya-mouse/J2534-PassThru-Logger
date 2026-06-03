@@ -1,6 +1,7 @@
 #include "HandleManager.h"
 #include "CanlibLoader.h"
 #include "Config.h"
+#include "Logger.h"
 #include <string.h>
 
 extern CanlibApi g_canlib;
@@ -19,10 +20,18 @@ static DWORD WINAPI isoTpRxThreadFunc(LPVOID param) {
         canStatus st = g_canlib.canReadWait(ch->canHandle, &id, data, &dlc,
                                             &flags, &timestamp, 10);
         if (st == canOK) {
-            if (!(flags & canMSG_ERROR_FRAME)) {
+            if (flags & canMSG_ERROR_FRAME) {
+                g_logger.debug("canRX ERR_FRAME ch=%lu id=0x%03lX flags=0x%X",
+                               ch->channelId, id, flags);
+            } else {
+                g_logger.debug("canRX ch=%lu id=0x%03lX dlc=%u flags=0x%X ts=%lu",
+                               ch->channelId, id, dlc, flags, timestamp);
+                if (g_logger.isDebug() && dlc > 0)
+                    g_logger.hexDump("  RX data", data, dlc);
                 engine->processFrame(id, flags, data, dlc, timestamp);
             }
         }
+        // canERR_NOMSG is normal (timeout) — don't log it
     }
     return 0;
 }
@@ -32,7 +41,6 @@ HandleManager::HandleManager() {
     memset(devices_, 0, sizeof(devices_));
     memset(channels_, 0, sizeof(channels_));
     nextDeviceId_ = 1232;
-    nextChannelId_ = 1;
 }
 
 HandleManager::~HandleManager() {
@@ -206,8 +214,10 @@ long HandleManager::openChannel(unsigned long deviceId, unsigned long protocolId
     if (hnd < 0) {
         LeaveCriticalSection(&lock_);
         setLastError("canOpenChannel(%d) failed: %d", canlibCh, hnd);
+        g_logger.debug("canOpenChannel(%d, 0x%X) FAILED: %d", canlibCh, openFlags, hnd);
         return ERR_DEVICE_NOT_CONNECTED;
     }
+    g_logger.debug("canOpenChannel(%d, 0x%X) = handle %d", canlibCh, openFlags, hnd);
 
     // Set bus parameters
     long freq = mapBaudRate(baudRate);
@@ -216,8 +226,10 @@ long HandleManager::openChannel(unsigned long deviceId, unsigned long protocolId
         g_canlib.canClose(hnd);
         LeaveCriticalSection(&lock_);
         setLastError("canSetBusParams(%ld) failed: %d", freq, st);
+        g_logger.debug("canSetBusParams(%ld) FAILED: %d", freq, st);
         return ERR_INVALID_BAUDRATE;
     }
+    g_logger.debug("canSetBusParams(freq=%ld) OK", freq);
 
     // Disable local TX echo (we don't want to receive our own transmissions)
     unsigned int noEcho = 0;
@@ -229,14 +241,16 @@ long HandleManager::openChannel(unsigned long deviceId, unsigned long protocolId
         g_canlib.canClose(hnd);
         LeaveCriticalSection(&lock_);
         setLastError("canBusOn failed: %d", st);
+        g_logger.debug("canBusOn FAILED: %d", st);
         return ERR_DEVICE_NOT_CONNECTED;
     }
+    g_logger.debug("canBusOn OK (handle=%d)", hnd);
 
     // Initialize channel state
     ChannelState *ch = &channels_[slot];
     memset(ch, 0, sizeof(ChannelState));
     ch->active = true;
-    ch->channelId = nextChannelId_++;
+    ch->channelId = (unsigned long)(slot + 1);  // 1-based slot index, reusable after close
     ch->deviceId = deviceId;
     ch->protocolId = protocolId;
     ch->flags = flags;

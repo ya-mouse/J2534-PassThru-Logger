@@ -80,8 +80,8 @@ KD_API long PTAPI PassThruClose(unsigned long DeviceID) {
 KD_API long PTAPI PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID,
                                    unsigned long Flags, unsigned long BaudRate,
                                    unsigned long *pChannelID) {
-    g_logger.apiEntry("PassThruConnect", "DeviceID=%lu, Proto=0x%lX, Flags=0x%lX, Baud=%lu",
-                      DeviceID, ProtocolID, Flags, BaudRate);
+    g_logger.apiEntry("PassThruConnect", "DeviceID=%lu, Proto=%s(0x%lX), Flags=0x%lX, Baud=%lu",
+                      DeviceID, kdProtocolName(ProtocolID), ProtocolID, Flags, BaudRate);
 
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
     if (!pChannelID) return ERR_NULL_PARAMETER;
@@ -228,8 +228,13 @@ KD_API long PTAPI PassThruWriteMsgs(unsigned long ChannelID, PASSTHRU_MSG *pMsg,
         if (ch->protocolId == J2534_CAN ||
             (ch->protocolId >= J2534_FD_CAN_CH1 && ch->protocolId <= J2534_FD_CAN_CH1 + 127)) {
             // Raw CAN write
+            g_logger.debug("canTX ch=%lu id=0x%03lX dlc=%u flags=0x%X",
+                           ChannelID, id, dlc, flag);
+            if (g_logger.isDebug() && dlc > 0)
+                g_logger.hexDump("  TX data", &pMsg[i].Data[4], dlc);
             canStatus st = g_canlib.canWrite(ch->canHandle, id, &pMsg[i].Data[4], dlc, flag);
             if (st != canOK) {
+                g_logger.debug("canWrite FAILED: %d", st);
                 setLastError("canWrite failed: %d", st);
                 break;
             }
@@ -374,7 +379,7 @@ KD_API long PTAPI PassThruGetLastError(char *pErrorDescription) {
 
 KD_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned long IoctlID,
                                  void *pInput, void *pOutput) {
-    g_logger.apiEntry("PassThruIoctl", "Ch=%lu, IoctlID=0x%lX", ChannelID, IoctlID);
+    g_logger.apiEntry("PassThruIoctl", "Ch=%lu, Ioctl=%s(0x%lX)", ChannelID, kdIoctlName(IoctlID), IoctlID);
 
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
 

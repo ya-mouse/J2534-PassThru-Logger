@@ -11,6 +11,12 @@
 #define KD_LOG_VERBOSE  1   // Function calls + args + return code
 #define KD_LOG_DEBUG    2   // + hex packet dumps + ISO-TP state transitions
 
+// Enum name lookup helpers
+const char* kdProtocolName(unsigned long protocolId);
+const char* kdIoctlName(unsigned long ioctlId);
+const char* kdRetCodeName(long code);
+const char* kdFilterTypeName(unsigned long filterType);
+
 class KdLogger {
 public:
     KdLogger();
@@ -26,6 +32,8 @@ public:
     int  level() const     { return level_; }
 
     // Formatted log (printf-style). Prepends timestamp + level tag.
+    // Has built-in dedup: repeated identical lines are suppressed until a
+    // different line appears, at which point "...repeated N times" is emitted.
     void verbose(const char *fmt, ...);
     void debug(const char *fmt, ...);
 
@@ -48,8 +56,15 @@ private:
     CRITICAL_SECTION lock_;
     bool            initialized_;
 
+    // Dedup state
+    char            lastLine_[1024];
+    int             lastLineLen_;
+    unsigned long   repeatCount_;
+
     void writeRaw(const char *buf, int len);
     void writeTimestamp();
+    void flushDedup();           // Emit "...repeated N times" if needed
+    void emitLine(const char *buf, int len);  // Dedup-aware line output
 };
 
 // Global logger instance

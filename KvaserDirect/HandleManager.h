@@ -109,7 +109,6 @@ private:
     DeviceState     devices_[4];        // Max 4 devices
     ChannelState    channels_[MAX_CHANNELS];
     unsigned long   nextDeviceId_;
-    unsigned long   nextChannelId_;
     CRITICAL_SECTION lock_;
 };
 
