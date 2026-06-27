@@ -409,6 +409,42 @@ Check `dllmain.cpp` — if `loadedFine` stays FALSE, all API calls return
 3. SampleClient connects successfully and messages appear in log
 4. Wire protocol enums in `WireProtocolConstants.h` match `J2534SerializationConstants.cs`
 
+### Remote Debugging on Windows via SSH
+
+DLLs and test executables are cross-compiled on macOS/Linux via Docker
+mingw, then copied to a Windows machine for execution. The Windows machine
+has Cygwin installed but no compiler — it is a test runner only.
+
+**Full procedure:** see
+[`.agents/knowledge/workflows/remote-windows-debugging.md`](../../knowledge/workflows/remote-windows-debugging.md)
+
+Quick reference:
+
+```bash
+# SSH into Windows (note double backslash in username)
+ssh -o StrictHostKeyChecking=no "DESKTOP-JGDBINM\\fartud@192.168.1.134" \
+  'c:\cygwin64\bin\bash -lc "<command>"'
+
+# Copy files (MUST use -O flag for cygwin compatibility)
+scp -O <local-file> "DESKTOP-JGDBINM\\fartud@192.168.1.134:<filename>"
+
+# Run unit tests
+ssh "DESKTOP-JGDBINM\\fartud@192.168.1.134" \
+  'c:\cygwin64\bin\bash -lc "cd ~/Downloads/PassThruLogger && ./test_simulator.exe"'
+
+# Run integration test with ReplayJ2534 DLL
+ssh "DESKTOP-JGDBINM\\fartud@192.168.1.134" \
+  'c:\cygwin64\bin\bash -lc "cd ~/Downloads/PassThruLogger && \
+    REPLAY_J2534_CONFIG=scenario.json REPLAY_J2534_INSTANT=1 \
+    ./j2534_test.exe ReplayJ2534.dll"'
+```
+
+Key gotchas (detailed in the workflow article):
+- **scp `-O` is mandatory** — the new SCP protocol fails on cygwin paths
+- **Username case** — SSH user is `fartud`, but Windows profile is `Fartud` (capital F)
+- **J: drive unavailable via SSH** — network mappings are per-session; use scp instead
+- **No gdb on Windows** — for crashes, rebuild with `-g -O0` and use printf diagnostics
+
 ---
 
 ## Project Structure
@@ -486,7 +522,8 @@ Check `dllmain.cpp` — if `loadedFine` stays FALSE, all API calls return
 │   ├── knowledge/
 │   │   ├── patterns/
 │   │   └── workflows/
-│   │       └── replay-scenario-authoring.md  # log2scenario + scenario authoring
+│   │       ├── replay-scenario-authoring.md  # log2scenario + scenario authoring
+│   │       └── remote-windows-debugging.md   # SSH/cygwin/scp remote test workflow
 │   └── skills/j2534-logger/SKILL.md # THIS FILE
 └── .github/
     └── copilot-instructions.md
