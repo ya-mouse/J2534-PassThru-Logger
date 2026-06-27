@@ -1,0 +1,44 @@
+# ReplayJ2534 — Cross-compile with mingw-w64 (i686, 32-bit)
+# Build: docker run --rm -v $(pwd):/src -w /src debian:bookworm-slim sh -c \
+#   "apt-get update && apt-get install -y g++-mingw-w64-i686 make && make -f ReplayJ2534/Makefile.mingw"
+
+CC = i686-w64-mingw32-g++
+
+SRCDIR = ReplayJ2534
+OUTDIR ?= build/Release
+EXTRA_CXXFLAGS ?= -O2
+
+SOURCES = $(SRCDIR)/dllmain.cpp \
+          $(SRCDIR)/J2534Api.cpp \
+          $(SRCDIR)/ConfigStore.cpp \
+          $(SRCDIR)/Simulator.cpp \
+          $(SRCDIR)/Scheduler.cpp \
+          $(SRCDIR)/Logger.cpp
+
+OBJECTS = $(SOURCES:.cpp=.o)
+
+TARGET = $(OUTDIR)/ReplayJ2534.dll
+
+CFLAGS = -Wall -std=c++11 -DREPLAYJ2534_EXPORTS -DWIN32_LEAN_AND_MEAN \
+         -D_WIN32_WINNT=0x0600 \
+         $(EXTRA_CXXFLAGS) \
+         -I$(SRCDIR)
+LDFLAGS = -shared -static-libgcc -static-libstdc++ \
+          -Wl,--kill-at,--enable-stdcall-fixup \
+          $(SRCDIR)/exports.def \
+          -ladvapi32
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built: $@"
+
+%.o: %.cpp
+	$(CC) $(CFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJECTS) $(TARGET)

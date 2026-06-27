@@ -1,0 +1,36 @@
+# ReplayJ2534 Tests — Cross-compile with mingw-w64, run with Wine
+# Usage: make -f ReplayJ2534/tests/Makefile.test
+#   or: docker run --rm -v $(pwd):/src debian:bookworm-slim sh -c \
+#     "apt-get update && apt-get install -y g++-mingw-w64-i686 make wine && make -f ReplayJ2534/tests/Makefile.test run"
+
+CC = i686-w64-mingw32-g++
+SRCDIR = ReplayJ2534
+TESTDIR = $(SRCDIR)/tests
+OUTDIR = build/tests
+
+CFLAGS = -Wall -std=c++11 -DUNIT_TEST -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
+         -DWIN32 -I$(SRCDIR) -g -O0
+
+LDFLAGS = -static -ladvapi32
+
+TEST_SOURCES = $(TESTDIR)/test_simulator.cpp \
+               $(SRCDIR)/ConfigStore.cpp \
+               $(SRCDIR)/Simulator.cpp \
+               $(SRCDIR)/Scheduler.cpp
+
+TEST_TARGET = $(OUTDIR)/test_simulator.exe
+
+.PHONY: all clean run
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SOURCES)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built: $@"
+
+run: $(TEST_TARGET)
+	wine $(TEST_TARGET)
+
+clean:
+	rm -rf $(OUTDIR)

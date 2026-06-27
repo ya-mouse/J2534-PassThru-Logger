@@ -9,6 +9,18 @@ tmp/
 # Agent local environment (user-specific)
 .agents/local.env
 
+# SSH keys (never commit)
+.ssh/
+
+# Tool-specific configs
+.claude/
+
+# Temporary binaries
+c32s/
+
+# Large log captures (not test fixtures)
+ReplayJ2534/log-replay-xentry.jsonl.json
+
 # User-specific files
 *.suo
 *.user

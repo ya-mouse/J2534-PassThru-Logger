@@ -384,6 +384,21 @@ KD_API long PTAPI PassThruIoctl(unsigned long ChannelID, unsigned long IoctlID,
     if (!g_initialized) return ERR_DEVICE_NOT_CONNECTED;
 
     ChannelState *ch = g_handleMgr.getChannel(ChannelID);
+
+    // READ_VBATT can be called with a device ID before any channel is open (e.g. Xentry)
+    if (IoctlID == READ_VBATT && !ch) {
+        DeviceState *dev = g_handleMgr.getDevice(ChannelID);
+        if (dev) {
+            g_logger.verbose("  READ_VBATT on device %lu (no channel open)", ChannelID);
+            if (!pOutput) return ERR_NULL_PARAMETER;
+            *(unsigned long *)pOutput = g_config.mockVbattMv;
+            g_logger.verbose("  VBATT=%lu mV (device-level mock)", *(unsigned long *)pOutput);
+            g_logger.apiReturn("PassThruIoctl/READ_VBATT", STATUS_NOERROR);
+            return STATUS_NOERROR;
+        }
+        return ERR_INVALID_CHANNEL_ID;
+    }
+
     if (!ch) return ERR_INVALID_CHANNEL_ID;
 
     long ret;

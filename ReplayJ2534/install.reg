@@ -1,0 +1,58 @@
+Windows Registry Editor Version 5.00
+
+; ReplayJ2534 — Scenario-driven J2534 replay DLL
+; Register as a PassThru v04.04 device in Windows
+;
+; Run this file as Administrator (right-click -> Merge).
+
+; ═══════════════════════════════════════════════════════════════════════
+; PassThru driver registration (64-bit Windows — WOW6432Node)
+; ═══════════════════════════════════════════════════════════════════════
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\PassThruSupport.04.04\ReplayJ2534]
+"Vendor"="ReplayJ2534"
+"Name"="ReplayJ2534 (Scenario Replay)"
+"FunctionLibrary"="C:\\Users\\Fartud\\Downloads\\PassThruLogger\\ReplayJ2534.dll"
+"ConfigApplication"="C:\\Users\\Fartud\\Downloads\\PassThruLogger\\PassThruLoggerControl.exe"
+
+"CAN"=dword:00000001
+"ISO15765"=dword:00000001
+"ISO9141"=dword:00000000
+"ISO14230"=dword:00000000
+"J1850VPW"=dword:00000000
+"J1850PWM"=dword:00000000
+"SCI_A_ENGINE"=dword:00000000
+"SCI_A_TRANS"=dword:00000000
+"SCI_B_ENGINE"=dword:00000000
+"SCI_B_TRANS"=dword:00000000
+
+; ═══════════════════════════════════════════════════════════════════════
+; PassThru driver registration (32-bit Windows — native path)
+; ═══════════════════════════════════════════════════════════════════════
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04\ReplayJ2534]
+"Vendor"="ReplayJ2534"
+"Name"="ReplayJ2534 (Scenario Replay)"
+"FunctionLibrary"="C:\\Users\\Fartud\\Downloads\\PassThruLogger\\ReplayJ2534.dll"
+"ConfigApplication"="C:\\Users\\Fartud\\Downloads\\PassThruLogger\\PassThruLoggerControl.exe"
+
+"CAN"=dword:00000001
+"ISO15765"=dword:00000001
+"ISO9141"=dword:00000000
+"ISO14230"=dword:00000000
+"J1850VPW"=dword:00000000
+"J1850PWM"=dword:00000000
+"SCI_A_ENGINE"=dword:00000000
+"SCI_A_TRANS"=dword:00000000
+"SCI_B_ENGINE"=dword:00000000
+"SCI_B_TRANS"=dword:00000000
+
+; ═══════════════════════════════════════════════════════════════════════
+; ReplayJ2534 configuration (per-user settings)
+; ═══════════════════════════════════════════════════════════════════════
+
+[HKEY_CURRENT_USER\SOFTWARE\ReplayJ2534]
+"ScenarioPath"="C:\\Users\\Fartud\\Downloads\\PassThruLogger\\scenario.json"
+"LogLevel"=dword:00000001
+"LogOutputPath"=""
+"Instant"=dword:00000001

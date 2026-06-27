@@ -231,6 +231,8 @@ Diagnostic App ──DLL calls──▶ PassThruLogger.dll ──DLL calls──
 | PassThruLogger/ | C++ | Proxy DLL — intercepts, forwards, and serializes J2534 API calls |
 | PassThruLoggerControl/ | C# | TCP server + WinForms GUI — deserializes and displays logged calls |
 | SampleClient/ | C# | Test client for development (sends synthetic messages) |
+| KvaserDirect/ | C++ | Direct J2534 DLL using Kvaser CANlib (no proxy, talks to real CAN hardware) |
+| ReplayJ2534/ | C++ | Scenario-driven replay DLL — simulates ECU replies from JSON config, no hardware needed |
 
 ---
 
@@ -314,16 +316,52 @@ using (var entry = reg32.CreateSubKey(@"Software\Passthru Logger"))
 
 ### Building
 
+**C++ DLLs (mingw cross-compile via Docker):**
+```bash
+make                    # all: PassThruLogger + KvaserDirect + ReplayJ2534 + C# apps
+make replay             # ReplayJ2534 DLL only → build/Release/ReplayJ2534.dll
+make kvaser             # KvaserDirect DLL only
+make test-replay        # ReplayJ2534 test exe (run on Windows or Wine)
+make test-replay-native # ConfigStore native tests (macOS/Linux, no Docker)
+```
+
+**C# apps (MSBuild or dotnet):**
 ```bash
 msbuild "J2534 PassThru Logger.sln" /p:Configuration=Release
 ```
 
-**Prerequisites:** Visual Studio 2017+ (MSBuild 15+), Windows SDK, .NET Framework 4.0 targeting pack.
-The DLL project builds as **x86/Win32** only.
+**Prerequisites:**
+- Docker (for mingw cross-compile; uses `j2534-builder` image)
+- Visual Studio 2017+ or .NET SDK for C# projects
+- Windows SDK, .NET Framework 4.0 targeting pack
+- All C++ DLLs build as **x86/Win32** only (J2534 spec mandate)
 
 ### Testing
 
-No automated test suite. Manual testing workflow:
+**ReplayJ2534 unit tests** (22 tests: ConfigStore + Simulator + Scheduler):
+```bash
+make test-replay        # build test exe
+# Run on Windows:
+./build/tests/test_simulator.exe
+# Or via Wine:
+wine build/tests/test_simulator.exe
+```
+
+**ConfigStore native tests** (11 tests, runs on macOS/Linux without Docker):
+```bash
+make test-replay-native
+```
+
+**ReplayJ2534 integration test** (on Windows with real DLL):
+```bash
+# Set scenario path and instant mode
+set REPLAY_J2534_CONFIG=scenario.json
+set REPLAY_J2534_INSTANT=1
+# Run test client against DLL
+j2534_test.exe ReplayJ2534.dll
+```
+
+**Manual protocol testing:**
 1. Build the full solution
 2. Launch `PassThruLoggerControl.exe`
 3. Run `SampleClient.exe` to verify TCP + deserialization
@@ -385,6 +423,34 @@ Check `dllmain.cpp` — if `loadedFine` stays FALSE, all API calls return
 │   ├── RegUtils.cpp/.h              # Windows Registry read helpers
 │   ├── J2534_v0404.h                # J2534 types, constants, function typedefs
 │   └── WireProtocolConstants.h      # Wire protocol enum definitions
+├── KvaserDirect/                    # C++ direct J2534 DLL (Kvaser CANlib)
+│   ├── J2534Api.cpp                 # 14 J2534 API wrappers → CANlib calls
+│   ├── KvaserCan.cpp/.h             # CANlib integration layer
+│   ├── IsoTpEngine.cpp/.h           # ISO 15765-2 (ISO-TP) transport
+│   ├── HandleMgr.cpp/.h             # Device/channel handle management
+│   ├── install.reg                  # Registry registration for PassThru
+│   └── tools/kvio_enum.cpp          # Kvaser I/O pin enumeration tool
+├── ReplayJ2534/                     # C++ scenario-driven replay DLL
+│   ├── Simulator.cpp/.h             # State machine + API dispatcher
+│   ├── ConfigStore.cpp/.h           # Scenario JSON loader (embedded rjson parser)
+│   ├── Scheduler.cpp/.h             # Background thread: periodic + delayed replies
+│   ├── J2534Api.cpp                 # 14 J2534 API wrappers → Simulator calls
+│   ├── dllmain.cpp                  # DLL entry: config loading, g_simulator init
+│   ├── Logger.cpp/.h                # ReplayLogger (diagnostics)
+│   ├── J2534Defs.h                  # J2534 v04.04 types & constants
+│   ├── exports.def                  # 14 J2534 API exports
+│   ├── scenario.json                # Example scenario config
+│   ├── LogParser.cpp/.h             # Old log parser (NOT in build, ref for converter)
+│   ├── ReplayEngine.cpp/.h          # Old replay engine (NOT in build, kept on disk)
+│   ├── Makefile.mingw               # DLL build rules
+│   ├── tests/                       # Unit tests (mingw + native)
+│   │   ├── test_simulator.cpp       # 22-test full suite (mingw)
+│   │   ├── test_configstore.cpp     # 11-test ConfigStore suite (native)
+│   │   ├── Makefile.test            # mingw cross-compile test build
+│   │   ├── Makefile.native          # native test build (macOS/Linux)
+│   │   └── stubs/windows.h          # Win32 stubs for native testing
+│   └── tools/
+│       └── log2scenario.py          # Convert .jsonl logs → scenario.json
 ├── PassThruLoggerControl/           # C# WinForms control/viewer app
 │   ├── Program.cs                   # Entry point
 │   ├── J2534LogController.cs        # Main form: TCP server + GUI
@@ -401,7 +467,12 @@ Check `dllmain.cpp` — if `loadedFine` stays FALSE, all API calls return
 │   ├── architecture.md              # System design and data flow
 │   ├── wire-protocol.md             # Binary protocol specification
 │   ├── installation.md              # Setup and usage guide
-│   └── development.md              # Build, test, development guide
+│   ├── development.md               # Build, test, development guide
+│   ├── replay-redesign.md           # ReplayJ2534 design doc
+│   ├── canlib-j2534-design.md       # KvaserDirect design doc
+│   └── kvaser.md                    # Kvaser hardware setup
+├── Makefile                         # Top-level: dll, kvaser, replay, control, sample
+├── Dockerfile.mingw                 # Docker image for mingw cross-compile
 ├── install.nsi                      # NSIS installer script
 ├── redist/                          # Runtime redistributables for installer
 ├── .agents/                         # Agent instructions, config & skills
@@ -413,6 +484,9 @@ Check `dllmain.cpp` — if `loadedFine` stays FALSE, all API calls return
 │   ├── pitfalls.md
 │   ├── pitfalls-live.md
 │   ├── knowledge/
+│   │   ├── patterns/
+│   │   └── workflows/
+│   │       └── replay-scenario-authoring.md  # log2scenario + scenario authoring
 │   └── skills/j2534-logger/SKILL.md # THIS FILE
 └── .github/
     └── copilot-instructions.md
@@ -444,7 +518,13 @@ if (writeParamPointer(pDeviceID))   // serializes NULL/NOTNULL, returns true if 
 
 ### Testing Patterns
 
-No automated test framework. Use `SampleClient` for manual protocol verification.
+- **ReplayJ2534**: 22-test mingw suite (`test_simulator.cpp`) covering
+  ConfigStore, Simulator state machine, IOCTL scoping, ReadMsgs/WriteMsgs
+  reply matching, and periodic generators. 11-test native suite
+  (`test_configstore.cpp`) for ConfigStore JSON parsing.
+- **KvaserDirect**: Unit tests for handle management and ISO-TP engine.
+- **PassThruLogger**: No automated tests — use `SampleClient` for manual
+  protocol verification.
 
 ---
 
@@ -457,8 +537,11 @@ No automated test framework. Use `SampleClient` for manual protocol verification
 | 7-bit encoding | Why not fixed-width ints | Adding new data types to wire protocol |
 | 512-byte buffer | Buffer size choice | Performance tuning, large message handling |
 | x86 only | J2534 spec constraint | Any platform/architecture discussions |
+| Scenario-driven replay | ReplayJ2534 design | Adding ECU simulation, replay behavior |
+| Embedded JSON parser | No external deps in ConfigStore | Changing scenario config format |
+| log2scenario converter | Log → scenario workflow | Creating new scenarios from captures |
 
-See `docs/architecture.md` and `docs/wire-protocol.md` for details.
+See `docs/architecture.md`, `docs/wire-protocol.md`, and `docs/replay-redesign.md` for details.
 
 ---
 
@@ -470,3 +553,6 @@ See `docs/architecture.md` and `docs/wire-protocol.md` for details.
 4. **Hardcoded paths** — use registry for DLL paths; installation directory varies
 5. **64-bit builds of the DLL** — J2534 spec mandates 32-bit; diagnostic apps load x86 DLLs
 6. **Dereferencing unchecked pointers** — always use `writeParamPointer()` guard before dereferencing
+7. **Hardcoding J2534 constant values** — always use `#define` from `J2534Defs.h`; values like `ISO15765=0x06` and `READ_VBATT=0x03` are non-obvious (see P-LIVE-002)
+8. **Using `-march=pentium3` in mingw builds** — causes segfault on modern Windows during static init (see P-LIVE-001)
+9. **Passing NULL mask/pattern to `PassThruStartMsgFilter`** — the J2534Api wrapper requires non-NULL `pMaskMsg` and `pPatternMsg`

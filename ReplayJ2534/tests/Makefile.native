@@ -1,0 +1,33 @@
+# ReplayJ2534 ConfigStore Tests — Native build (macOS/Linux)
+# Usage: make -f ReplayJ2534/tests/Makefile.native test
+
+CXX ?= g++
+SRCDIR = ReplayJ2534
+TESTDIR = $(SRCDIR)/tests
+OUTDIR = build/tests_native
+
+CFLAGS = -Wall -std=c++11 -fdeclspec -I$(TESTDIR)/stubs -I$(TESTDIR) -I$(SRCDIR) -g \
+         -Wno-ignored-attributes
+
+# Use win32_stub.h as windows.h replacement via stubs dir
+override CFLAGS += -DWIN32 -D_WIN32_WINNT=0x0600
+
+TEST_SOURCES = $(TESTDIR)/test_configstore.cpp \
+               $(SRCDIR)/ConfigStore.cpp
+
+TEST_TARGET = $(OUTDIR)/test_configstore
+
+.PHONY: all clean test
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SOURCES)
+	@mkdir -p $(OUTDIR)
+	$(CXX) $(CFLAGS) -o $@ $^
+	@echo "Built: $@"
+
+test: $(TEST_TARGET)
+	$(TEST_TARGET)
+
+clean:
+	rm -rf $(OUTDIR)

@@ -1,0 +1,237 @@
+{
+  "connectionId": 1,
+  "client": "D:\\Program Files (x86)\\Mercedes-Benz\\xentry\\bin\\java\\bin\\javawl.exe",
+  "driver": "",
+  "status": "Disconnected",
+  "eventCount": 803,
+  "entries": [
+    {
+      "timestamp": "2026-06-09T19:01:53.863137Z",
+      "text": "Client: D:\\Program Files (x86)\\Mercedes-Benz\\xentry\\bin\\java\\bin\\javawl.exe",
+      "index": 0,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:53.8829828Z",
+      "text": "Driver: ",
+      "index": 0,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:54.2258231Z",
+      "text": "PassThruOpen(NULL, 1232) -\u003E STATUS_NOERROR",
+      "index": 0,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:54.2588456Z",
+      "text": "PassThruReadVersion(1232, \u00223.37.0\u0022, \u00221.0.0\u0022, \u002204.04\u0022) -\u003E STATUS_NOERROR",
+      "index": 1,
+      "count": 2
+    },
+    {
+      "timestamp": "2026-06-09T19:01:57.4072586Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1349640156) -\u003E STATUS_NOERROR",
+      "index": 3,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:57.6180052Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1349644124) -\u003E STATUS_NOERROR",
+      "index": 4,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:57.7088862Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1349644140) -\u003E STATUS_NOERROR",
+      "index": 5,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:01:57.8132081Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1348267916) -\u003E STATUS_NOERROR",
+      "index": 6,
+      "count": 5
+    },
+    {
+      "timestamp": "2026-06-09T19:02:08.9159718Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1349641820) -\u003E STATUS_NOERROR",
+      "index": 11,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:08.9772043Z",
+      "text": "PassThruConnect(1232, ISO15765, CAN_ID_BOTH, 500000, 2) -\u003E STATUS_NOERROR",
+      "index": 12,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:08.9868439Z",
+      "text": "PassThruStartMsgFilter(2, FLOW_CONTROL_FILTER, {ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 4; ExtraIndex: 0; Data: FF-FF-FF-FF}, {ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 4; ExtraIndex: 0; Data: 00-00-04-80}, {ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 4; ExtraIndex: 0; Data: 00-00-06-02}, 1) -\u003E STATUS_NOERROR",
+      "index": 13,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.0073053Z",
+      "text": "PassThruIoctl(2, SET_CONFIG, [[ISO15765_STMIN_TX, 65535], [ISO15765_BS, 8], [ISO15765_STMIN, 40]], NULL) -\u003E STATUS_NOERROR",
+      "index": 14,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.0263249Z",
+      "text": "PassThruWriteMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 6; ExtraIndex: 0; Data: 00-00-06-02-10-03}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 15,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.0388777Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 16,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.0535096Z",
+      "text": "PassThruReadMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: 0; TS: 00:00:00; LEN: 10; ExtraIndex: 10; Data: 00-00-04-80-50-03-00-14-00-C8}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 17,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.0658848Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 18,
+      "count": 48
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.5358792Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1349641200) -\u003E ERR_INVALID_CHANNEL_ID",
+      "index": 66,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:09.5506293Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 67,
+      "count": 130
+    },
+    {
+      "timestamp": "2026-06-09T19:02:11.1747954Z",
+      "text": "PassThruWriteMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 6; ExtraIndex: 0; Data: 00-00-06-02-3E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 197,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:11.1781234Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 198,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:11.2095619Z",
+      "text": "PassThruReadMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: 0; TS: 00:00:00.0020000; LEN: 6; ExtraIndex: 6; Data: 00-00-04-80-7E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 199,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:11.2175099Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 200,
+      "count": 47
+    },
+    {
+      "timestamp": "2026-06-09T19:02:12.5252398Z",
+      "text": "PassThruIoctl(1232, READ_VBATT, NULL, 1348267916) -\u003E ERR_INVALID_CHANNEL_ID",
+      "index": 247,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:12.600638Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 248,
+      "count": 61
+    },
+    {
+      "timestamp": "2026-06-09T19:02:13.2809756Z",
+      "text": "PassThruWriteMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 6; ExtraIndex: 0; Data: 00-00-06-02-3E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 309,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:13.2880738Z",
+      "text": "PassThruReadMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: 0; TS: 00:00:00.0040000; LEN: 6; ExtraIndex: 6; Data: 00-00-04-80-7E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 310,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:13.3011816Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 311,
+      "count": 187
+    },
+    {
+      "timestamp": "2026-06-09T19:02:15.2930332Z",
+      "text": "PassThruWriteMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 6; ExtraIndex: 0; Data: 00-00-06-02-3E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 498,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:15.3037134Z",
+      "text": "PassThruReadMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: 0; TS: 00:00:00.0060000; LEN: 6; ExtraIndex: 6; Data: 00-00-04-80-7E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 499,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:15.316372Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 500,
+      "count": 188
+    },
+    {
+      "timestamp": "2026-06-09T19:02:17.3108931Z",
+      "text": "PassThruWriteMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: ISO15765_FRAME_PAD; TS: 00:00:00; LEN: 6; ExtraIndex: 0; Data: 00-00-06-02-3E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 688,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:17.3171178Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 689,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:17.329143Z",
+      "text": "PassThruReadMsgs(2, [{ISO15765; RxStatus: 0; TxFlags: 0; TS: 00:00:00.0080000; LEN: 6; ExtraIndex: 6; Data: 00-00-04-80-7E-00}], 1=\u003E1, 0) -\u003E STATUS_NOERROR",
+      "index": 690,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:17.3416057Z",
+      "text": "PassThruReadMsgs(2, [], 1=\u003E0, 0) -\u003E ERR_BUFFER_EMPTY",
+      "index": 691,
+      "count": 107
+    },
+    {
+      "timestamp": "2026-06-09T19:02:18.6795963Z",
+      "text": "PassThruIoctl(0, UNK(10ECB); , 1349642808, 0) -\u003E ERR_INVALID_CHANNEL_ID",
+      "index": 798,
+      "count": 2
+    },
+    {
+      "timestamp": "2026-06-09T19:02:18.8440648Z",
+      "text": "PassThruStopMsgFilter(2, 1) -\u003E STATUS_NOERROR",
+      "index": 800,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:18.8529116Z",
+      "text": "PassThruDisconnect(2) -\u003E STATUS_NOERROR",
+      "index": 801,
+      "count": 1
+    },
+    {
+      "timestamp": "2026-06-09T19:02:18.8796409Z",
+      "text": "PassThruClose(1232) -\u003E STATUS_NOERROR",
+      "index": 802,
+      "count": 1
+    }
+  ]
+}

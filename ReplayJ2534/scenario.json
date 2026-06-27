@@ -1,0 +1,72 @@
+{
+  "device": {
+    "firmwareVersion": "3.37.0",
+    "dllVersion": "1.0.0",
+    "apiVersion": "04.04",
+    "vbatt_mV": 12000
+  },
+
+  "ioctls": {
+    "READ_VBATT":  { "return": "STATUS_NOERROR", "output": "auto", "scope": "device" },
+    "SET_CONFIG":  { "return": "STATUS_NOERROR", "scope": "channel", "consumeInput": true },
+    "GET_CONFIG":  { "return": "STATUS_NOERROR", "scope": "channel", "output": "auto" },
+    "CLEAR_RX_BUFFER":     { "return": "STATUS_NOERROR", "scope": "channel" },
+    "CLEAR_TX_BUFFER":     { "return": "STATUS_NOERROR", "scope": "channel" },
+    "CLEAR_MSG_FILTERS":   { "return": "STATUS_NOERROR", "scope": "channel" },
+    "CLEAR_PERIODIC_MSGS": { "return": "STATUS_NOERROR", "scope": "channel" },
+    "0x10ECB":     { "return": "ERR_INVALID_IOCTL_ID", "scope": "any" }
+  },
+
+  "targets": [
+    {
+      "name": "ECM",
+      "match": { "protocolId": "ISO15765", "flags": "CAN_ID_BOTH", "baud": 500000 },
+      "preferredChannelId": 2,
+      "replies": [
+        {
+          "match": { "data": "00-00-06-02-10-03", "mode": "prefix" },
+          "response": {
+            "data": "00-00-04-80-50-03-00-14-00-C8",
+            "delayMs": 10,
+            "rxStatus": 0,
+            "txFlags": 0,
+            "protocolId": "ISO15765"
+          }
+        },
+        {
+          "match": { "data": "00-00-06-02-3E-00", "mode": "prefix" },
+          "response": {
+            "data": "00-00-04-80-7E-00",
+            "delayMs": 8,
+            "rxStatus": 0,
+            "txFlags": 0,
+            "protocolId": "ISO15765"
+          }
+        }
+      ],
+      "periodic": [
+        {
+          "intervalMs": 2000,
+          "msg": {
+            "protocolId": "ISO15765",
+            "data": "00-00-04-80-7E-00",
+            "rxStatus": 0,
+            "txFlags": 0
+          },
+          "startOn": "connect",
+          "stopOn": "disconnect"
+        }
+      ]
+    }
+  ],
+
+  "states": {
+    "initial": "CLOSED",
+    "transitions": [
+      { "event": "PassThruOpen",       "from": "CLOSED",  "to": "OPENED" },
+      { "event": "PassThruConnect",    "from": "OPENED",  "to": "OPENED" },
+      { "event": "PassThruDisconnect", "from": "OPENED",  "to": "OPENED" },
+      { "event": "PassThruClose",      "from": "OPENED",  "to": "CLOSED" }
+    ]
+  }
+}

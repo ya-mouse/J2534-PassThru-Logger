@@ -29,9 +29,9 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser control sample clean docker-image test-kvaser tools-kvaser
+.PHONY: all dll kvaser replay control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native
 
-all: dll kvaser control sample
+all: dll kvaser replay control sample
 
 # ─── C++ DLL (Docker + mingw-w64) ────────────────────────────────────────────
 
@@ -58,6 +58,17 @@ kvaser: docker-image
 docker-image:
 	@docker inspect $(DOCKER_IMAGE) >/dev/null 2>&1 || \
 		docker build -f Dockerfile.mingw -t $(DOCKER_IMAGE) .
+
+# ─── ReplayJ2534 DLL (Docker + mingw-w64) ───────────────────────────────────
+
+replay: docker-image
+	@mkdir -p $(OUTDIR)
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f ReplayJ2534/Makefile.mingw \
+		OUTDIR=$(OUTDIR) \
+		EXTRA_CXXFLAGS="$(MINGW_OPT)"
+	@cp ReplayJ2534/scenario.json $(OUTDIR)/
+	@echo "→ $(OUTDIR)/ReplayJ2534.dll + scenario.json"
 
 # ─── C# PassThruLoggerControl ────────────────────────────────────────────────
 
@@ -93,3 +104,16 @@ tools-kvaser: docker-image
 	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
 		make -f KvaserDirect/tools/Makefile.tools
 	@echo "→ build/tools/kvio_enum.exe"
+
+# ─── ReplayJ2534 Unit Tests (compile only — run on Windows or with Wine) ────
+
+test-replay: docker-image
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f ReplayJ2534/tests/Makefile.test
+	@echo "→ build/tests/test_simulator.exe (run on Windows or via Wine)"
+
+# ─── ReplayJ2534 ConfigStore Tests (native, no Docker) ──────────────────────
+
+test-replay-native:
+	make -f ReplayJ2534/tests/Makefile.native test
+	@echo "→ ConfigStore tests passed"
