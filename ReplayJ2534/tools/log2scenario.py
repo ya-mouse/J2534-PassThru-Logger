@@ -11,8 +11,13 @@ suitable for ReplayJ2534. It:
   • Extracts device metadata (firmware/dll/api versions, vbatt)
   • Builds the IOCTL table from observed PassThruIoctl calls
   • Infers targets from PassThruConnect parameters (protocol/flags/baud)
-  • Pairs WriteMsgs requests with subsequent ReadMsgs replies into reply rules
+  • Pairs WriteMsgs requests with their UDS response (service|0x40 positive or
+    0x7F negative) among subsequent ReadMsgs replies, falling back to the
+    first read when the service byte can't be located
+  • Excludes response reads from periodic-message detection
   • Detects recurring ReadMsgs patterns as periodic generators
+  • Conservatively collapses reply rules sharing an identical response and a
+    conflict-free common match prefix
   • Generates the standard CLOSED↔OPENED state machine
 
 The output is a starting point — review and adjust delays, periodic intervals,
@@ -43,9 +48,23 @@ CONNECT_FLAG_NAMES = {v: k for k, v in CONNECT_FLAGS.items()}
 
 TX_FLAGS = {
     "ISO15765_FRAME_PAD": 0x0040, "WAIT_P3_MIN_ONLY": 0x0200,
-    "ISO15765_ADDR_TYPE": 0x0080,
+    "ISO15765_ADDR_TYPE": 0x0080, "CAN_29BIT_ID": 0x0100,
+    "SCI_MODE": 0x400000, "SCI_TX_VOLTAGE": 0x800000,
+    "SW_CAN_HV_TX": 0x00000400,
 }
 TX_FLAG_NAMES = {v: k for k, v in TX_FLAGS.items()}
+
+# J2534-1 v04.04 (and J2534-2) RxStatus flags — the logger emits these
+# symbolically (often `|`-joined) rather than as a raw integer.
+RX_STATUS_FLAGS = {
+    "TX_MSG_TYPE": 0x0001, "START_OF_MESSAGE": 0x0002,
+    "RX_BREAK": 0x0004, "TX_INDICATION": 0x0008,
+    "ISO15765_PADDING_ERROR": 0x0010, "ISO15765_ADDR_TYPE": 0x0080,
+    "CAN_29BIT_ID": 0x0100,
+    "SW_CAN_HV_RX": 0x00010000, "SW_CAN_HS_RX": 0x00020000,
+    "SW_CAN_NS_RX": 0x00040000, "OVERFLOW_": 0x00010000,
+}
+RX_STATUS_NAMES = {v: k for k, v in RX_STATUS_FLAGS.items()}
 
 FILTER_TYPES = {
     "PASS_FILTER": 1, "BLOCK_FILTER": 2, "FLOW_CONTROL_FILTER": 3,
@@ -88,6 +107,15 @@ ERROR_CODES = {
 }
 ERROR_NAMES = {v: k for k, v in ERROR_CODES.items()}
 
+# UDS/KWP service ids used to locate the service byte inside a PASSTHRU_MSG.
+# OBD services (0x01..0x0A) are deliberately excluded so that ISO-TP PCI /
+# length bytes (which often sit in the same range) are not mistaken for a
+# service id.
+SERVICE_IDS = {
+    0x10, 0x11, 0x14, 0x19, 0x1A, 0x1E, 0x22, 0x23, 0x27, 0x2E,
+    0x31, 0x34, 0x3B, 0x3D, 0x3E, 0x85, 0x87, 0xA5, 0xA9, 0xAA, 0xAE,
+}
+
 
 def lookup(name, table):
     """Look up a symbolic name in a table dict, returning the value or None."""
@@ -97,6 +125,26 @@ def lookup(name, table):
 def lookup_name(value, name_table):
     """Reverse-lookup a value to its symbolic name."""
     return name_table.get(value)
+
+
+def parse_flags(val, table):
+    """Parse a flag field that may be a decimal/hex integer, a single
+    symbolic name, or several names joined by '|'. Unknown symbolic tokens
+    are skipped silently. Returns the bitwise OR of all resolved tokens."""
+    result = 0
+    for token in val.split("|"):
+        token = token.strip()
+        if not token:
+            continue
+        named = table.get(token)
+        if named is not None:
+            result |= named
+        else:
+            try:
+                result |= int(token, 0)
+            except ValueError:
+                pass  # unknown symbolic flag — skip
+    return result
 
 
 def parse_iso_timestamp(ts):
@@ -171,13 +219,9 @@ def parse_message(msg_text):
         val = val.strip()
 
         if key == "RxStatus":
-            msg.rx_status = int(val, 0)
+            msg.rx_status = parse_flags(val, RX_STATUS_FLAGS)
         elif key == "TxFlags":
-            named = lookup(val, TX_FLAGS)
-            if named is not None:
-                msg.tx_flags = named
-            else:
-                msg.tx_flags = int(val, 0)
+            msg.tx_flags = parse_flags(val, TX_FLAGS)
         elif key == "LEN":
             pass  # data length is inferred from Data field
         elif key == "ExtraIndex":
@@ -450,6 +494,30 @@ def _parse_filter_stop(ev):
 
 # ─── Scenario builder ────────────────────────────────────────────────────────
 
+def detect_service_offset(events):
+    """Determine the byte index that holds the UDS/KWP service id in a write
+    message. Picks the index (>=2) that most frequently contains a recognized
+    service id across all WriteMsgs events. Returns None if no clear offset is
+    found, in which case the builder falls back to first-read pairing."""
+    counts = defaultdict(int)
+    for ev in events:
+        if ev.func != "PassThruWriteMsgs" or not ev.msgs:
+            continue
+        data = ev.msgs[0].data
+        # Only the first service byte per message counts, to avoid biasing the
+        # histogram toward multi-service payloads.
+        for i in range(2, len(data)):
+            if data[i] in SERVICE_IDS:
+                counts[i] += 1
+                break
+    if not counts:
+        return None
+    best, n = max(counts.items(), key=lambda kv: kv[1])
+    if n < 3:
+        return None  # too few hits to trust
+    return best
+
+
 class ScenarioBuilder:
     """Accumulates parsed events and builds the scenario JSON."""
 
@@ -475,9 +543,10 @@ class ScenarioBuilder:
             ],
         }
         self._channel_target = {}  # channel_id -> (proto, flags, baud)
-        self._last_write = {}  # channel_id -> (write_msg, timestamp)
+        self._last_write = {}  # channel_id -> (write_msg, ts, target_key, svc_idx, svc) or None
         self._read_seen = defaultdict(list)  # channel_id -> [(msg_data, timestamp)]
         self._all_events = []
+        self._service_offset = None  # detected index of the UDS service byte
 
     def process_event(self, ev):
         self._all_events.append(ev)
@@ -550,34 +619,70 @@ class ScenarioBuilder:
             "periodic": [],
         }
 
+    def _service_for(self, msg):
+        """Return (svc_idx, svc) for a write message, or (None, None) if the
+        service byte can't be located (offset unknown or message too short)."""
+        off = self._service_offset
+        if off is None or off >= len(msg.data):
+            return (None, None)
+        return (off, msg.data[off])
+
+    @staticmethod
+    def _is_response(write_msg, svc_idx, svc, read_msg):
+        """True if read_msg is the UDS response to write_msg.
+
+        Matches a positive response (service | 0x40 at the same offset) or a
+        negative response (0x7F followed by the service byte). When the service
+        byte is unknown, falls back to True so the first read is treated as the
+        response (legacy behavior)."""
+        if svc_idx is None or svc is None:
+            return True
+        rdata = read_msg.data
+        if svc_idx >= len(rdata):
+            return False
+        if rdata[svc_idx] == (svc | 0x40):
+            return True
+        if (rdata[svc_idx] == 0x7F
+                and svc_idx + 1 < len(rdata)
+                and rdata[svc_idx + 1] == svc):
+            return True
+        return False
+
     def _process_write(self, ev):
         if not ev.msgs:
             return
         write_msg = ev.msgs[0]
         # Store with the target key so we can find it later even after disconnect
         target_key = self._channel_target.get(ev.channel_id)
-        self._last_write[ev.channel_id] = (write_msg, ev.timestamp, target_key)
+        svc_idx, svc = self._service_for(write_msg)
+        # Any still-pending write on this channel timed out (no matching
+        # response arrived) — drop it without emitting a rule.
+        self._last_write[ev.channel_id] = (write_msg, ev.timestamp, target_key,
+                                           svc_idx, svc)
 
     def _process_read(self, ev):
         if not ev.msgs:
-            return  # empty read (ERR_BUFFER_EMPTY) — don't clear last_write
-        for msg in ev.msgs:
-            self._read_seen[ev.channel_id].append((msg, ev.timestamp))
-
-        # Try to pair with last write on this channel
-        last = self._last_write.get(ev.channel_id)
-        if last and last[0] is not None:
-            write_msg, write_ts, target_key = last
-            for read_msg in ev.msgs:
-                delay_ms = 0
-                if write_ts and ev.timestamp:
-                    delta = (ev.timestamp - write_ts).total_seconds() * 1000
-                    delay_ms = max(0, int(delta))
-                self.write_read_pairs.append((
-                    ev.channel_id, write_msg, read_msg, delay_ms, target_key
-                ))
-            # Clear so we don't pair the same write with later reads
-            self._last_write[ev.channel_id] = None
+            return  # empty read (ERR_BUFFER_EMPTY) — don't touch pending write
+        pending = self._last_write.get(ev.channel_id)
+        for read_msg in ev.msgs:
+            paired = False
+            if pending and pending[0] is not None:
+                write_msg, write_ts, target_key, svc_idx, svc = pending
+                if self._is_response(write_msg, svc_idx, svc, read_msg):
+                    delay_ms = 0
+                    if write_ts and ev.timestamp:
+                        delta = (ev.timestamp - write_ts).total_seconds() * 1000
+                        delay_ms = max(0, int(delta))
+                    self.write_read_pairs.append((
+                        ev.channel_id, write_msg, read_msg, delay_ms, target_key
+                    ))
+                    # Clear so we don't pair the same write with later reads
+                    self._last_write[ev.channel_id] = None
+                    pending = None  # later reads in this event are unsolicited
+                    paired = True
+            if not paired:
+                # Unsolicited read — feed periodic detection only
+                self._read_seen[ev.channel_id].append((read_msg, ev.timestamp))
 
     def _detect_periodic(self, channel_id, reads, target_key=None):
         """Detect periodic messages: same data appearing multiple times at
@@ -609,6 +714,77 @@ class ScenarioBuilder:
                 self.periodic_candidates.append(
                     (channel_id, data, int(avg), target_key)
                 )
+
+    @staticmethod
+    def _hex_to_bytes(hex_str):
+        try:
+            return bytes.fromhex(hex_str.replace("-", ""))
+        except (ValueError, AttributeError):
+            return b""
+
+    def _collapse_prefix_rules(self, replies):
+        """Conservatively merge reply rules that share an identical response
+        and whose match-data share a conflict-free common prefix.
+
+        The replay engine fires ALL matching prefix rules (no first-match), so
+        a collapsed prefix rule is only emitted when every rule whose
+        match-data starts with that prefix belongs to the same response-group
+        — otherwise the prefix rule would also fire for a different response
+        and produce a spurious extra reply."""
+        if len(replies) < 2:
+            return replies
+        MIN_PREFIX_BYTES = 3
+
+        def resp_sig(r):
+            resp = r["response"]
+            return (resp.get("data"), resp.get("protocolId"),
+                    resp.get("rxStatus"), resp.get("txFlags"))
+
+        groups = defaultdict(list)
+        for r in replies:
+            groups[resp_sig(r)].append(r)
+
+        result = []
+        absorbed = set()
+        for grp in groups.values():
+            if len(grp) < 2:
+                continue
+            bdatas = [self._hex_to_bytes(r["match"]["data"]) for r in grp]
+            if any(not b for b in bdatas):
+                continue
+            # Longest common byte-aligned prefix length
+            lcp_len = 0
+            for i in range(min(len(b) for b in bdatas)):
+                if len({b[i] for b in bdatas}) == 1:
+                    lcp_len = i + 1
+                else:
+                    break
+            if lcp_len < MIN_PREFIX_BYTES:
+                continue
+            lcp_bytes = bdatas[0][:lcp_len]
+            # No reduction if every member already equals the prefix
+            if all(b == lcp_bytes for b in bdatas):
+                continue
+            # Conflict: any rule outside this group whose match-data starts
+            # with the same prefix would also trigger the collapsed rule.
+            outside = [r for r in replies if r not in grp]
+            if any(self._hex_to_bytes(o["match"]["data"]).startswith(lcp_bytes)
+                   for o in outside):
+                continue
+            for r in grp:
+                absorbed.add(id(r))
+            rep = grp[0]
+            result.append({
+                "match": {
+                    "data": "-".join(f"{b:02X}" for b in lcp_bytes),
+                    "mode": "prefix",
+                },
+                "response": dict(rep["response"]),
+            })
+        for r in replies:
+            if id(r) not in absorbed:
+                result.append(r)
+        return result
 
     def build(self):
         """Build the final scenario JSON dict."""
@@ -660,6 +836,11 @@ class ScenarioBuilder:
                 tx_name = lookup_name(reply_msg.tx_flags, TX_FLAG_NAMES)
                 reply_rule["response"]["txFlags"] = tx_name if tx_name else reply_msg.tx_flags
             target["replies"].append(reply_rule)
+
+        # Conservatively collapse rules with identical responses and a
+        # conflict-free common match prefix.
+        for target in self.targets.values():
+            target["replies"] = self._collapse_prefix_rules(target["replies"])
 
         # Assign periodic generators to targets
         for channel_id, data, interval_ms, target_key in self.periodic_candidates:
@@ -750,6 +931,12 @@ def main():
     print(f"Loaded {len(events)} events from {input_path}")
 
     builder = ScenarioBuilder()
+    builder._service_offset = detect_service_offset(events)
+    if builder._service_offset is not None:
+        print(f"  Detected UDS service byte at offset {builder._service_offset}; "
+              f"using semantic response pairing")
+    else:
+        print(f"  Service-byte offset unknown; using legacy first-read pairing")
     for ev in events:
         builder.process_event(ev)
 
