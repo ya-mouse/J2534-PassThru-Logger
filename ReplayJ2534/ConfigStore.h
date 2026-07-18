@@ -41,11 +41,17 @@ struct MsgSpec {
 
 enum MatchMode { MATCH_PREFIX = 0, MATCH_EXACT };
 
+enum ResponseMode { RESPONSE_SINGLE = 0, RESPONSE_SEQUENCE };
+
 struct ReplyRule {
     HexBytes matchData;
     MatchMode mode;
-    MsgSpec response;
+    MsgSpec response;           // common fields (proto/rx/tx) + single-mode data
     unsigned long delayMs;
+    // Sequence mode: response.data is ignored, sequenceData holds varying payloads
+    ResponseMode responseMode;
+    std::vector<HexBytes> sequenceData;
+    unsigned long timeWindowMs;
 };
 
 struct PeriodicRule {

@@ -49,6 +49,11 @@ public:
     int rxQueueSize(unsigned long channelId);
 
 private:
+    struct SeqState {
+        size_t index;
+        unsigned long lastAdvanceMs;
+    };
+
     struct Channel {
         unsigned long id;
         unsigned long protocolId;
@@ -57,9 +62,11 @@ private:
         const Target *target;
         std::deque<PASSTHRU_MSG> rxQueue;
         std::vector<unsigned long> filters;
+        std::unordered_map<const ReplyRule*, SeqState> seqStates;
     };
 
     bool initialized_;
+    bool instantMode_;
     ConfigStore config_;
     Scheduler scheduler_;
 

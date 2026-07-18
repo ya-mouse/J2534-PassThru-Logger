@@ -636,6 +636,202 @@ TEST(sim_filters) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sequence-mode test scenario
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const char *TEST_SCENARIO_SEQ =
+"{\n"
+"  \"device\": {\n"
+"    \"firmwareVersion\": \"3.37.0\",\n"
+"    \"dllVersion\": \"1.0.0\",\n"
+"    \"apiVersion\": \"04.04\",\n"
+"    \"vbatt_mV\": 12000\n"
+"  },\n"
+"  \"ioctls\": {\n"
+"    \"READ_VBATT\": { \"return\": \"STATUS_NOERROR\", \"output\": \"auto\", \"scope\": \"device\" }\n"
+"  },\n"
+"  \"targets\": [\n"
+"    {\n"
+"      \"name\": \"ECM\",\n"
+"      \"match\": { \"protocolId\": \"ISO15765\", \"flags\": \"CAN_ID_BOTH\", \"baud\": 500000 },\n"
+"      \"preferredChannelId\": 2,\n"
+"      \"replies\": [\n"
+"        {\n"
+"          \"match\": { \"data\": \"00-00-06-02-22-01\", \"mode\": \"prefix\" },\n"
+"          \"response\": {\n"
+"            \"mode\": \"sequence\",\n"
+"            \"sequence\": [\n"
+"              \"00-00-04-80-62-01-AA\",\n"
+"              \"00-00-04-80-62-01-BB\",\n"
+"              \"00-00-04-80-62-01-CC\"\n"
+"            ],\n"
+"            \"timeWindowMs\": 100,\n"
+"            \"delayMs\": 0,\n"
+"            \"protocolId\": \"ISO15765\"\n"
+"          }\n"
+"        }\n"
+"      ]\n"
+"    }\n"
+"  ],\n"
+"  \"states\": {\n"
+"    \"initial\": \"CLOSED\",\n"
+"    \"transitions\": [\n"
+"      { \"event\": \"PassThruOpen\", \"from\": \"CLOSED\", \"to\": \"OPENED\" },\n"
+"      { \"event\": \"PassThruConnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"      { \"event\": \"PassThruDisconnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"      { \"event\": \"PassThruClose\", \"from\": \"OPENED\", \"to\": \"CLOSED\" }\n"
+"    ]\n"
+"  }\n"
+"}\n";
+
+static const char *writeSeqScenarioFile() {
+    const char *path = "test_scenario_seq.json";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return NULL;
+    fputs(TEST_SCENARIO_SEQ, fp);
+    fclose(fp);
+    return path;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ConfigStore sequence parsing test
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(config_sequence_parsing) {
+    ConfigStore cs;
+    ASSERT_TRUE(cs.load(writeSeqScenarioFile()));
+    ASSERT_EQ(1, (int)cs.targets().size());
+    const Target *t = cs.findTarget(J2534_ISO15765, CAN_ID_BOTH, 500000);
+    ASSERT_TRUE(t != NULL);
+    ASSERT_EQ(1, (int)t->replies.size());
+    const ReplyRule &r = t->replies[0];
+    ASSERT_EQ((int)RESPONSE_SEQUENCE, (int)r.responseMode);
+    ASSERT_EQ(100UL, r.timeWindowMs);
+    ASSERT_EQ(3, (int)r.sequenceData.size());
+    ASSERT_EQ(7, r.sequenceData[0].len);
+    ASSERT_EQ(0xAA, r.sequenceData[0].data[6]);
+    ASSERT_EQ(0xBB, r.sequenceData[1].data[6]);
+    ASSERT_EQ(0xCC, r.sequenceData[2].data[6]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Simulator sequence advance + loop test (instant mode: advance every read)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(sim_sequence_advance_and_loop) {
+    Simulator sim;
+    sim.init(writeSeqScenarioFile(), true);  // instant mode
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    PASSTHRU_MSG req = makeMsg("00-00-06-02-22-01");
+    unsigned long num = 1;
+    PASSTHRU_MSG reply;
+    unsigned long rnum = 1;
+
+    // 1st read: returns seq[0] (initialization, no advance)
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    // 2nd read: advances to seq[1]
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xBB, reply.Data[6]);
+
+    // 3rd read: advances to seq[2]
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xCC, reply.Data[6]);
+
+    // 4th read: wraps to seq[0] (loop)
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Time-gated advance test (non-instant mode: burst holds, spread advances)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(sim_sequence_time_gated_advance) {
+    Simulator sim;
+    // NON-instant mode: timeWindowMs=100 from TEST_SCENARIO_SEQ
+    sim.init(writeSeqScenarioFile(), false);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    PASSTHRU_MSG req = makeMsg("00-00-06-02-22-01");
+    unsigned long num = 1;
+    PASSTHRU_MSG reply;
+    unsigned long rnum = 1;
+
+    // Use timeout=500 in readMsgs so it waits for Scheduler delivery
+    // instead of returning ERR_BUFFER_EMPTY if the reply isn't queued yet.
+
+    // 1st read: initialization → seq[0] (AA), no advance
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    // 2nd read immediately (burst, <100ms window) → still seq[0] (AA)
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    // 3rd read immediately (still burst) → still seq[0] (AA)
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    // Sleep past window (100ms), then read → advance to seq[1] (BB)
+    Sleep(150);
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xBB, reply.Data[6]);
+
+    // Sleep past window → advance to seq[2] (CC)
+    Sleep(150);
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xCC, reply.Data[6]);
+
+    // Sleep past window → wrap to seq[0] (AA) — loop in non-instant mode
+    Sleep(150);
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    sim.readMsgs(ch, &reply, &rnum, 500);
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -650,6 +846,7 @@ int main() {
     RUN_TEST(config_hex_parsing);
     RUN_TEST(config_return_code_lookup);
     RUN_TEST(config_ioctl_key_parsing);
+    RUN_TEST(config_sequence_parsing);
 
     printf("\n--- State Machine ---\n");
     RUN_TEST(sim_open_close);
@@ -670,6 +867,10 @@ int main() {
     RUN_TEST(sim_periodic);
     RUN_TEST(sim_periodic_stops_on_disconnect);
 
+    printf("\n--- Sequence Mode ---\n");
+    RUN_TEST(sim_sequence_advance_and_loop);
+    RUN_TEST(sim_sequence_time_gated_advance);
+
     printf("\n--- Version / Filters ---\n");
     RUN_TEST(sim_read_version);
     RUN_TEST(sim_filters);
@@ -677,8 +878,9 @@ int main() {
     printf("\n=== Results: %d passed, %d failed, %d total ===\n\n",
            g_tests_passed, g_tests_failed, g_tests_run);
 
-    // Cleanup temp file
+    // Cleanup temp files
     remove("test_scenario.json");
+    remove("test_scenario_seq.json");
 
     return g_tests_failed > 0 ? 1 : 0;
 }

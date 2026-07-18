@@ -547,6 +547,9 @@ class ScenarioBuilder:
         self._read_seen = defaultdict(list)  # channel_id -> [(msg_data, timestamp)]
         self._all_events = []
         self._service_offset = None  # detected index of the UDS service byte
+        self._write_response_history = defaultdict(list)  # (target_key, write_hex) -> [(ts, response_msg)]
+        self._sequence_threshold = 3  # >3 unique responses → sequence mode
+        self._max_sequence_len = 200  # cap sequence length (evenly sampled)
 
     def process_event(self, ev):
         self._all_events.append(ev)
@@ -676,6 +679,8 @@ class ScenarioBuilder:
                     self.write_read_pairs.append((
                         ev.channel_id, write_msg, read_msg, delay_ms, target_key
                     ))
+                    self._write_response_history[(target_key, write_msg.data_hex)].append(
+                        (ev.timestamp, read_msg))
                     # Clear so we don't pair the same write with later reads
                     self._last_write[ev.channel_id] = None
                     pending = None  # later reads in this event are unsolicited
@@ -726,11 +731,21 @@ class ScenarioBuilder:
         """Conservatively merge reply rules that share an identical response
         and whose match-data share a conflict-free common prefix.
 
+        Sequence-mode rules have varying responses and are never collapsed.
+
         The replay engine fires ALL matching prefix rules (no first-match), so
         a collapsed prefix rule is only emitted when every rule whose
         match-data starts with that prefix belongs to the same response-group
         — otherwise the prefix rule would also fire for a different response
         and produce a spurious extra reply."""
+        sequence_replies = [r for r in replies
+                            if r["response"].get("mode") == "sequence"]
+        single_replies = [r for r in replies
+                          if r["response"].get("mode") != "sequence"]
+        collapsed = self._collapse_single_prefix_rules(single_replies)
+        return collapsed + sequence_replies
+
+    def _collapse_single_prefix_rules(self, replies):
         if len(replies) < 2:
             return replies
         MIN_PREFIX_BYTES = 3
@@ -786,6 +801,58 @@ class ScenarioBuilder:
                 result.append(r)
         return result
 
+    def _build_sequence_rule(self, match_data, history, delay_ms, first_reply):
+        """Build a sequence-mode reply rule from a history of responses.
+
+        Sorts by timestamp, dedups consecutive identical values, caps at
+        max_sequence_len (evenly sampled), and computes timeWindowMs from
+        the 25th percentile of inter-arrival times."""
+        sorted_history = sorted(history, key=lambda x: x[0] or datetime.min)
+        deduped = []
+        for ts, msg in sorted_history:
+            if not deduped or deduped[-1][1].data_hex != msg.data_hex:
+                deduped.append((ts, msg))
+        time_window = self._compute_time_window(deduped)
+        max_len = self._max_sequence_len
+        if len(deduped) > max_len:
+            n = len(deduped)
+            indices = [int(i * (n - 1) / (max_len - 1)) for i in range(max_len)]
+            deduped = [deduped[i] for i in indices]
+        sequence = [msg.data_hex for _, msg in deduped]
+        rule = {
+            "match": {"data": match_data, "mode": "prefix"},
+            "response": {
+                "mode": "sequence",
+                "sequence": sequence,
+                "timeWindowMs": time_window,
+                "delayMs": delay_ms,
+                "protocolId": lookup_name(first_reply.protocol_id, PROTOCOL_NAMES)
+                              or first_reply.protocol_id,
+            },
+        }
+        if first_reply.rx_status:
+            rule["response"]["rxStatus"] = first_reply.rx_status
+        if first_reply.tx_flags:
+            tx_name = lookup_name(first_reply.tx_flags, TX_FLAG_NAMES)
+            rule["response"]["txFlags"] = tx_name if tx_name else first_reply.tx_flags
+        return rule
+
+    @staticmethod
+    def _compute_time_window(deduped_history):
+        """Compute timeWindowMs from inter-arrival 25th percentile."""
+        intervals = []
+        for i in range(1, len(deduped_history)):
+            ts_prev = deduped_history[i - 1][0]
+            ts_curr = deduped_history[i][0]
+            if ts_prev and ts_curr:
+                delta = (ts_curr - ts_prev).total_seconds() * 1000
+                intervals.append(delta)
+        if not intervals:
+            return 1000
+        intervals.sort()
+        p25 = intervals[len(intervals) // 4]
+        return max(100, int(p25))
+
     def build(self):
         """Build the final scenario JSON dict."""
         # Ensure default IOCTLs are present
@@ -808,6 +875,7 @@ class ScenarioBuilder:
             }
 
         # Assign reply rules to targets
+        seen_writes_per_target = defaultdict(set)
         for channel_id, write_msg, reply_msg, delay_ms, target_key in self.write_read_pairs:
             if not target_key or target_key not in self.targets:
                 continue
@@ -815,26 +883,30 @@ class ScenarioBuilder:
 
             # Check if this request already has a reply
             match_data = write_msg.data_hex
-            existing = any(
-                r["match"]["data"] == match_data
-                for r in target["replies"]
-            )
-            if existing:
+            if match_data in seen_writes_per_target[target_key]:
                 continue
+            seen_writes_per_target[target_key].add(match_data)
 
-            reply_rule = {
-                "match": {"data": match_data, "mode": "prefix"},
-                "response": {
-                    "data": reply_msg.data_hex,
-                    "delayMs": delay_ms,
-                    "protocolId": lookup_name(reply_msg.protocol_id, PROTOCOL_NAMES) or reply_msg.protocol_id,
-                },
-            }
-            if reply_msg.rx_status:
-                reply_rule["response"]["rxStatus"] = reply_msg.rx_status
-            if reply_msg.tx_flags:
-                tx_name = lookup_name(reply_msg.tx_flags, TX_FLAG_NAMES)
-                reply_rule["response"]["txFlags"] = tx_name if tx_name else reply_msg.tx_flags
+            history = self._write_response_history.get((target_key, match_data), [])
+            unique_responses = {r.data_hex for _, r in history}
+
+            if len(unique_responses) > self._sequence_threshold:
+                reply_rule = self._build_sequence_rule(
+                    match_data, history, delay_ms, reply_msg)
+            else:
+                reply_rule = {
+                    "match": {"data": match_data, "mode": "prefix"},
+                    "response": {
+                        "data": reply_msg.data_hex,
+                        "delayMs": delay_ms,
+                        "protocolId": lookup_name(reply_msg.protocol_id, PROTOCOL_NAMES) or reply_msg.protocol_id,
+                    },
+                }
+                if reply_msg.rx_status:
+                    reply_rule["response"]["rxStatus"] = reply_msg.rx_status
+                if reply_msg.tx_flags:
+                    tx_name = lookup_name(reply_msg.tx_flags, TX_FLAG_NAMES)
+                    reply_rule["response"]["txFlags"] = tx_name if tx_name else reply_msg.tx_flags
             target["replies"].append(reply_rule)
 
         # Conservatively collapse rules with identical responses and a
@@ -911,16 +983,21 @@ def load_log(path):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <input.jsonl> [output.json]")
-        print(f"  Converts a PassThruLogger capture to a ReplayJ2534 scenario.json")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Convert PassThruLogger capture to ReplayJ2534 scenario.json")
+    parser.add_argument("input", help="Input .jsonl log file")
+    parser.add_argument("output", nargs="?", help="Output scenario.json path")
+    parser.add_argument("--max-sequence-len", type=int, default=200,
+                        help="Max entries per sequence (default 200, evenly sampled)")
+    args = parser.parse_args()
+    if args.max_sequence_len < 2:
+        parser.error("--max-sequence-len must be at least 2")
 
-    input_path = sys.argv[1]
-    if len(sys.argv) >= 3:
-        output_path = sys.argv[2]
+    input_path = args.input
+    if args.output:
+        output_path = args.output
     else:
-        # Default: replace .jsonl with .scenario.json
         if input_path.endswith(".jsonl"):
             output_path = input_path[:-6] + ".scenario.json"
         else:
@@ -932,6 +1009,7 @@ def main():
 
     builder = ScenarioBuilder()
     builder._service_offset = detect_service_offset(events)
+    builder._max_sequence_len = args.max_sequence_len
     if builder._service_offset is not None:
         print(f"  Detected UDS service byte at offset {builder._service_offset}; "
               f"using semantic response pairing")
@@ -949,8 +1027,16 @@ def main():
     # Summary
     n_ioctls = len(scenario["ioctls"])
     n_targets = len(scenario["targets"])
-    n_replies = sum(len(t["replies"]) for t in scenario["targets"])
-    n_periodic = sum(len(t["periodic"]) for t in scenario["targets"])
+    n_single = 0
+    n_sequence = 0
+    n_seq_entries = 0
+    for t in scenario["targets"]:
+        for r in t["replies"]:
+            if r["response"].get("mode") == "sequence":
+                n_sequence += 1
+                n_seq_entries += len(r["response"]["sequence"])
+            else:
+                n_single += 1
 
     print(f"Written: {output_path}")
     print(f"  Device: fw={scenario['device']['firmwareVersion']}, "
@@ -959,8 +1045,9 @@ def main():
           f"vbatt={scenario['device']['vbatt_mV']}mV")
     print(f"  IOCTLs: {n_ioctls}")
     print(f"  Targets: {n_targets}")
-    print(f"  Reply rules: {n_replies}")
-    print(f"  Periodic generators: {n_periodic}")
+    print(f"  Reply rules: {n_single + n_sequence} "
+          f"({n_single} single + {n_sequence} sequence, {n_seq_entries} seq entries)")
+    print(f"  Periodic generators: {sum(len(t['periodic']) for t in scenario['targets'])}")
 
 
 if __name__ == "__main__":

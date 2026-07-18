@@ -506,7 +506,7 @@ bool ConfigStore::parseMsgSpec(const rjson::Value &v, MsgSpec &msg) {
 }
 
 bool ConfigStore::parseReply(const rjson::Value &v, ReplyRule &rule) {
-    memset(&rule, 0, sizeof(rule));
+    rule = ReplyRule{};  // value-initialize (safe with std::vector member)
     if (const rjson::Value *m = v.find("match")) {
         const char *md = m->getCstr("mode", "prefix");
         rule.mode = parseMatchMode(md);
@@ -516,6 +516,22 @@ bool ConfigStore::parseReply(const rjson::Value &v, ReplyRule &rule) {
     if (const rjson::Value *r = v.find("response")) {
         parseMsgSpec(*r, rule.response);
         rule.delayMs = (unsigned long)r->getNum("delayMs", 0);
+        const char *rm = r->getCstr("mode", "single");
+        if (strcmp(rm, "sequence") == 0) {
+            rule.responseMode = RESPONSE_SEQUENCE;
+            rule.timeWindowMs = (unsigned long)r->getNum("timeWindowMs", 1000);
+            if (const rjson::Value *seq = r->find("sequence")) {
+                if (seq->type == rjson::T_ARR) {
+                    for (size_t i = 0; i < seq->arr.size(); i++) {
+                        HexBytes hb;
+                        parseHexBytes(seq->arr[i], hb);
+                        rule.sequenceData.push_back(hb);
+                    }
+                }
+            }
+            if (rule.sequenceData.empty())
+                rule.responseMode = RESPONSE_SINGLE;
+        }
     }
     return true;
 }

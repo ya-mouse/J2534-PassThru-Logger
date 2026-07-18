@@ -252,6 +252,74 @@ TEST(config_missing_file) {
     ASSERT_TRUE(cs.lastError()[0] != '\0');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Sequence-mode parsing test
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const char *TEST_SCENARIO_SEQ =
+"{\n"
+"  \"device\": { \"firmwareVersion\": \"1.0\", \"dllVersion\": \"1.0\", \"apiVersion\": \"04.04\", \"vbatt_mV\": 12000 },\n"
+"  \"ioctls\": {},\n"
+"  \"targets\": [\n"
+"    {\n"
+"      \"name\": \"ECU\",\n"
+"      \"match\": { \"protocolId\": \"ISO15765\", \"flags\": \"CAN_ID_BOTH\", \"baud\": 500000 },\n"
+"      \"preferredChannelId\": 1,\n"
+"      \"replies\": [\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-21-03\", \"mode\": \"prefix\" },\n"
+"          \"response\": {\n"
+"            \"mode\": \"sequence\",\n"
+"            \"sequence\": [\"00-00-07-E8-61-03-AA\", \"00-00-07-E8-61-03-BB\", \"00-00-07-E8-61-03-CC\"],\n"
+"            \"timeWindowMs\": 500,\n"
+"            \"delayMs\": 10,\n"
+"            \"protocolId\": \"ISO15765\"\n"
+"          }\n"
+"        },\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-3E-00\", \"mode\": \"prefix\" },\n"
+"          \"response\": { \"data\": \"00-00-07-E8-7E-00\", \"delayMs\": 0, \"protocolId\": \"ISO15765\" }\n"
+"        }\n"
+"      ]\n"
+"    }\n"
+"  ],\n"
+"  \"states\": { \"initial\": \"CLOSED\", \"transitions\": [\n"
+"    { \"event\": \"PassThruOpen\", \"from\": \"CLOSED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruClose\", \"from\": \"OPENED\", \"to\": \"CLOSED\" }\n"
+"  ] }\n"
+"}\n";
+
+TEST(config_sequence_parsing) {
+    const char *path = "test_scenario_seq.json";
+    FILE *fp = fopen(path, "wb");
+    fputs(TEST_SCENARIO_SEQ, fp);
+    fclose(fp);
+
+    ConfigStore cs;
+    ASSERT_TRUE(cs.load(path));
+    const Target *t = cs.findTarget(J2534_ISO15765, CAN_ID_BOTH, 500000);
+    ASSERT_TRUE(t != NULL);
+    ASSERT_EQ(2, (int)t->replies.size());
+
+    // First reply: sequence mode
+    const ReplyRule &seqRule = t->replies[0];
+    ASSERT_EQ((int)RESPONSE_SEQUENCE, (int)seqRule.responseMode);
+    ASSERT_EQ(500UL, seqRule.timeWindowMs);
+    ASSERT_EQ(10UL, seqRule.delayMs);
+    ASSERT_EQ(3, (int)seqRule.sequenceData.size());
+    ASSERT_EQ(7, seqRule.sequenceData[0].len);
+    ASSERT_EQ(0xAA, seqRule.sequenceData[0].data[6]);
+    ASSERT_EQ(0xBB, seqRule.sequenceData[1].data[6]);
+    ASSERT_EQ(0xCC, seqRule.sequenceData[2].data[6]);
+    ASSERT_EQ(J2534_ISO15765, seqRule.response.protocolId);
+
+    // Second reply: single mode (backward compat)
+    const ReplyRule &singleRule = t->replies[1];
+    ASSERT_EQ((int)RESPONSE_SINGLE, (int)singleRule.responseMode);
+    ASSERT_EQ(0, (int)singleRule.sequenceData.size());
+    ASSERT_EQ(6, singleRule.response.data.len);
+
+    remove(path);
+}
+
 int main() {
     printf("\n=== ReplayJ2534 ConfigStore Tests (native) ===\n\n");
 
@@ -266,6 +334,7 @@ int main() {
     RUN_TEST(config_state_machine);
     RUN_TEST(config_invalid_json);
     RUN_TEST(config_missing_file);
+    RUN_TEST(config_sequence_parsing);
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n\n",
            g_tests_passed, g_tests_failed, g_tests_run);

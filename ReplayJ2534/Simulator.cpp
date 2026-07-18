@@ -4,7 +4,8 @@
 #include <stdio.h>
 
 Simulator::Simulator()
-    : initialized_(false), deviceId_(0), nextChannelId_(1), nextFilterId_(1) {
+    : initialized_(false), instantMode_(false), deviceId_(0),
+      nextChannelId_(1), nextFilterId_(1) {
     InitializeCriticalSection(&lock_);
     InitializeConditionVariable(&rxCond_);
 }
@@ -34,6 +35,7 @@ bool Simulator::init(const char *configPath, bool instantMode) {
 
     scheduler_.init(this, instantMode);
     scheduler_.start();
+    instantMode_ = instantMode;
     initialized_ = true;
 
     g_logger.verbose("Simulator: initialized (state=%s, %d targets)",
@@ -265,16 +267,33 @@ long Simulator::writeMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
     for (unsigned long i = 0; i < count; i++) {
         accepted++;
         if (!ch->target) continue;
-        // Match reply rules
         for (const auto &rule : ch->target->replies) {
-            if (matchReply(rule, pMsg[i])) {
-                PASSTHRU_MSG reply;
-                memset(&reply, 0, sizeof(reply));
+            if (!matchReply(rule, pMsg[i])) continue;
+            PASSTHRU_MSG reply;
+            memset(&reply, 0, sizeof(reply));
+            if (rule.responseMode == RESPONSE_SEQUENCE &&
+                !rule.sequenceData.empty()) {
+                SeqState &st = ch->seqStates[&rule];
+                unsigned long now = GetTickCount();
+                unsigned long window = instantMode_ ? 0 : rule.timeWindowMs;
+                if (st.lastAdvanceMs == 0) {
+                    st.lastAdvanceMs = now;
+                } else if (now - st.lastAdvanceMs >= window) {
+                    st.index = (st.index + 1) % rule.sequenceData.size();
+                    st.lastAdvanceMs = now;
+                }
                 msgSpecToPassthru(rule.response, reply);
-                scheduler_.scheduleReply(channelId, reply, rule.delayMs);
-                g_logger.verbose("  Simulator: reply scheduled ch=%lu delay=%lums",
-                                 channelId, rule.delayMs);
+                const HexBytes &hb = rule.sequenceData[st.index];
+                reply.DataSize = hb.len;
+                reply.ExtraDataIndex = hb.len;
+                if (hb.len > 0 && hb.len <= (int)sizeof(reply.Data))
+                    memcpy(reply.Data, hb.data, hb.len);
+                g_logger.verbose("  Simulator: seq reply ch=%lu idx=%zu/%zu",
+                                 channelId, st.index, rule.sequenceData.size());
+            } else {
+                msgSpecToPassthru(rule.response, reply);
             }
+            scheduler_.scheduleReply(channelId, reply, rule.delayMs);
         }
     }
 
