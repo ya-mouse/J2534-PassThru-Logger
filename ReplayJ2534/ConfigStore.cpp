@@ -314,7 +314,7 @@ unsigned long ConfigStore::parseHexBytes(const char *str, unsigned char *buf, in
 // ConfigStore
 // ═══════════════════════════════════════════════════════════════════════════
 
-ConfigStore::ConfigStore() : loaded_(false) {
+ConfigStore::ConfigStore() : loaded_(false), emitEcho_(false) {
     memset(&device_, 0, sizeof(device_));
     lastError_[0] = '\0';
 }
@@ -323,6 +323,7 @@ ConfigStore::~ConfigStore() { clear(); }
 
 void ConfigStore::clear() {
     loaded_ = false;
+    emitEcho_ = false;
     ioctls_.clear();
     targets_.clear();
     stateMachine_ = StateMachineConfig();
@@ -386,6 +387,7 @@ bool ConfigStore::parseScenario(const rjson::Value &root) {
         if (!parseTargets(*v)) return false;
     if (const rjson::Value *v = root.find("states"))
         if (!parseStates(*v)) return false;
+    emitEcho_ = root.getBool("emitEcho", false);
     return true;
 }
 

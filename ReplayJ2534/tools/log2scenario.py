@@ -957,6 +957,7 @@ class ScenarioBuilder:
             "ioctls": self.ioctls,
             "targets": targets_list,
             "states": self.state_machine,
+            "emitEcho": True,
         }
 
 

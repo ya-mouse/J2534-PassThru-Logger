@@ -112,6 +112,7 @@ public:
     const std::vector<IoctlRule>& ioctls() const { return ioctls_; }
     const std::vector<Target>& targets() const { return targets_; }
     const StateMachineConfig& stateMachine() const { return stateMachine_; }
+    bool emitEcho() const { return emitEcho_; }
 
     const IoctlRule* findIoctl(unsigned long ioctlId) const;
     const Target* findTarget(unsigned long protocolId, unsigned long flags,
@@ -127,6 +128,7 @@ public:
 
 private:
     bool loaded_;
+    bool emitEcho_;
     char lastError_[512];
 
     DeviceConfig device_;

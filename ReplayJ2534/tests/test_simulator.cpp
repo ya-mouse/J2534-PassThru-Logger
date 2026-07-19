@@ -832,6 +832,136 @@ TEST(sim_sequence_time_gated_advance) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Echo + START_OF_MESSAGE test scenario (emitEcho: true)
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const char *TEST_SCENARIO_ECHO =
+"{\n"
+"  \"device\": { \"firmwareVersion\": \"1.0\", \"dllVersion\": \"1.0\", \"apiVersion\": \"04.04\", \"vbatt_mV\": 12000 },\n"
+"  \"ioctls\": {},\n"
+"  \"emitEcho\": true,\n"
+"  \"targets\": [\n"
+"    {\n"
+"      \"name\": \"ECU\",\n"
+"      \"match\": { \"protocolId\": \"ISO15765\", \"flags\": \"CAN_ID_BOTH\", \"baud\": 500000 },\n"
+"      \"preferredChannelId\": 1,\n"
+"      \"replies\": [\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-22-F1-00\", \"mode\": \"prefix\" },\n"
+"          \"response\": { \"data\": \"00-00-07-E8-62-F1-00-AA-BB\", \"delayMs\": 0, \"protocolId\": \"ISO15765\" } }\n"
+"      ]\n"
+"    }\n"
+"  ],\n"
+"  \"states\": { \"initial\": \"CLOSED\", \"transitions\": [\n"
+"    { \"event\": \"PassThruOpen\", \"from\": \"CLOSED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruConnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruDisconnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruClose\", \"from\": \"OPENED\", \"to\": \"CLOSED\" }\n"
+"  ] }\n"
+"}\n";
+
+static const char *writeEchoScenarioFile() {
+    const char *path = "test_scenario_echo.json";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return NULL;
+    fputs(TEST_SCENARIO_ECHO, fp);
+    fclose(fp);
+    return path;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Echo + SOM + response cycle test (instant mode)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(sim_echo_and_som) {
+    Simulator sim;
+    sim.init(writeEchoScenarioFile(), true);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    // Write: 00-00-07-E0-22-F1-00 (request to CAN ID 0x7E0)
+    PASSTHRU_MSG req = makeMsg("00-00-07-E0-22-F1-00");
+    unsigned long num = 1;
+    sim.writeMsgs(ch, &req, &num, 0);
+
+    // Read 1: loopback echo (TX_INDICATION, 4 bytes = write CAN ID)
+    PASSTHRU_MSG msg;
+    unsigned long rnum = 1;
+    sim.readMsgs(ch, &msg, &rnum, 500);
+    ASSERT_EQ(1UL, rnum);
+    ASSERT_EQ(4UL, msg.DataSize);
+    ASSERT_EQ(0x0009UL, msg.RxStatus);  // TX_MSG_TYPE | TX_INDICATION
+    ASSERT_EQ(0x07, msg.Data[2]);
+    ASSERT_EQ(0xE0, msg.Data[3]);
+
+    // Read 2: START_OF_MESSAGE (4 bytes = response CAN ID 0x7E8)
+    rnum = 1;
+    sim.readMsgs(ch, &msg, &rnum, 500);
+    ASSERT_EQ(1UL, rnum);
+    ASSERT_EQ(4UL, msg.DataSize);
+    ASSERT_EQ(0x0002UL, msg.RxStatus);  // START_OF_MESSAGE
+    ASSERT_EQ(0x07, msg.Data[2]);
+    ASSERT_EQ(0xE8, msg.Data[3]);
+
+    // Read 3: actual response data (full payload)
+    rnum = 1;
+    sim.readMsgs(ch, &msg, &rnum, 500);
+    ASSERT_EQ(1UL, rnum);
+    ASSERT_EQ(9UL, msg.DataSize);
+    ASSERT_EQ(0x0000UL, msg.RxStatus);  // no flags = real data
+    ASSERT_EQ(0x62, msg.Data[4]);       // positive response to 0x22
+
+    // Read 4: queue should be empty (ERR_BUFFER_EMPTY)
+    rnum = 1;
+    long ret = sim.readMsgs(ch, &msg, &rnum, 0);
+    ASSERT_EQ(ERR_BUFFER_EMPTY, ret);
+    ASSERT_EQ(0UL, rnum);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Echo-only test: no matching rule → only echo, no SOM/response
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(sim_echo_no_match) {
+    Simulator sim;
+    sim.init(writeEchoScenarioFile(), true);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    // Write a message that doesn't match any reply rule
+    PASSTHRU_MSG req = makeMsg("00-00-07-E0-3E-00");
+    unsigned long num = 1;
+    sim.writeMsgs(ch, &req, &num, 0);
+
+    // Read 1: loopback echo only (TX_INDICATION)
+    PASSTHRU_MSG msg;
+    unsigned long rnum = 1;
+    sim.readMsgs(ch, &msg, &rnum, 500);
+    ASSERT_EQ(1UL, rnum);
+    ASSERT_EQ(4UL, msg.DataSize);
+    ASSERT_EQ(0x0009UL, msg.RxStatus);
+
+    // Read 2: queue empty (no SOM, no response — ECU didn't respond)
+    rnum = 1;
+    long ret = sim.readMsgs(ch, &msg, &rnum, 0);
+    ASSERT_EQ(ERR_BUFFER_EMPTY, ret);
+    ASSERT_EQ(0UL, rnum);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -871,6 +1001,10 @@ int main() {
     RUN_TEST(sim_sequence_advance_and_loop);
     RUN_TEST(sim_sequence_time_gated_advance);
 
+    printf("\n--- Echo + START_OF_MESSAGE ---\n");
+    RUN_TEST(sim_echo_and_som);
+    RUN_TEST(sim_echo_no_match);
+
     printf("\n--- Version / Filters ---\n");
     RUN_TEST(sim_read_version);
     RUN_TEST(sim_filters);
@@ -881,6 +1015,7 @@ int main() {
     // Cleanup temp files
     remove("test_scenario.json");
     remove("test_scenario_seq.json");
+    remove("test_scenario_echo.json");
 
     return g_tests_failed > 0 ? 1 : 0;
 }

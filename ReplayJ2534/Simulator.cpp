@@ -253,7 +253,7 @@ long Simulator::readMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
 }
 
 long Simulator::writeMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
-                          unsigned long *pNumMsgs, unsigned long timeout) {
+                           unsigned long *pNumMsgs, unsigned long timeout) {
     EnterCriticalSection(&lock_);
     Channel *ch = findChannel(channelId);
     if (!ch) {
@@ -263,9 +263,28 @@ long Simulator::writeMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
 
     unsigned long count = pNumMsgs ? *pNumMsgs : 0;
     unsigned long accepted = 0;
+    bool echo = config_.emitEcho();
 
     for (unsigned long i = 0; i < count; i++) {
         accepted++;
+
+        /* Emit loopback echo (TX_INDICATION) for every write when
+           echo is enabled. The real J2534 device echoes the write
+           CAN ID back to the app as a TX confirmation. Without this,
+           Xentry does not recognize the write was sent and times out
+           during module enumeration. */
+        if (echo) {
+            PASSTHRU_MSG echoMsg;
+            memset(&echoMsg, 0, sizeof(echoMsg));
+            echoMsg.ProtocolID = pMsg[i].ProtocolID;
+            echoMsg.RxStatus = 0x0009; /* TX_MSG_TYPE | TX_INDICATION */
+            echoMsg.DataSize = (pMsg[i].DataSize >= 4) ? 4 : pMsg[i].DataSize;
+            echoMsg.ExtraDataIndex = echoMsg.DataSize;
+            memcpy(echoMsg.Data, pMsg[i].Data, echoMsg.DataSize);
+            scheduler_.scheduleReply(channelId, echoMsg,
+                                     instantMode_ ? 0 : 12);
+        }
+
         if (!ch->target) continue;
         for (const auto &rule : ch->target->replies) {
             if (!matchReply(rule, pMsg[i])) continue;
@@ -293,6 +312,24 @@ long Simulator::writeMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
             } else {
                 msgSpecToPassthru(rule.response, reply);
             }
+
+            /* Emit START_OF_MESSAGE notification before the response
+               when the response comes from a different CAN ID than
+               the write. The J2534 device notifies the app that a
+               new message is arriving from a different source. */
+            if (echo && reply.DataSize >= 4 && pMsg[i].DataSize >= 4 &&
+                memcmp(reply.Data, pMsg[i].Data, 4) != 0) {
+                PASSTHRU_MSG som;
+                memset(&som, 0, sizeof(som));
+                som.ProtocolID = reply.ProtocolID;
+                som.RxStatus = 0x0002; /* START_OF_MESSAGE */
+                som.DataSize = 4;
+                som.ExtraDataIndex = 4;
+                memcpy(som.Data, reply.Data, 4);
+                scheduler_.scheduleReply(channelId, som,
+                                         instantMode_ ? 0 : 27);
+            }
+
             scheduler_.scheduleReply(channelId, reply, rule.delayMs);
         }
     }
