@@ -240,6 +240,14 @@ namespace PassThruLoggerControl
             {
                 Console.WriteLine("Connectionclosed, unable to do stuff.");
             }
+            catch (System.Net.Sockets.SocketException e)
+            {
+                // 995 (ERROR_OPERATION_ABORTED): listener socket was closed
+                // during shutdown while an async Accept was pending.
+                // 10054 (WSAECONNRESET): connection reset.
+                // Both are expected during app shutdown — don't crash.
+                Console.WriteLine("AcceptCallback socket error (code={0})", e.ErrorCode);
+            }
         }
 
         /////////////////////// Extra functions

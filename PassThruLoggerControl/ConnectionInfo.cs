@@ -79,8 +79,12 @@ namespace PassThruLoggerControl
 
         ~ConnectionInfo()
         {
-            //tmpLogstream.Close();
-            File.Delete(tmpLogPath);
+            // Finalizers must never throw. Close the writer before deleting
+            // the temp file — if the writer is still open, File.Delete throws
+            // IOException, which becomes an unhandled exception and tears
+            // down the whole process.
+            try { logWriter?.Dispose(); } catch { }
+            try { File.Delete(tmpLogPath); } catch { }
         }
 
         private void recvThreadFunc()
@@ -169,7 +173,7 @@ namespace PassThruLoggerControl
             {
                 Console.WriteLine("Connectionclosed, unable to do stuff.");
                 state = CONNSTATE.Disconnected;
-                form.updateConnectionListEntry(this);
+                SafeUpdateConnectionListEntry();
             }
             catch (System.Net.Sockets.SocketException e)
             {
@@ -184,8 +188,8 @@ namespace PassThruLoggerControl
                 else if (!is_mid_msg)
                 {
                     state = CONNSTATE.Disconnected;
-                    form.updateConnectionListEntry(this);
-                    socket.Close();
+                    SafeUpdateConnectionListEntry();
+                    try { socket.Close(); } catch { }
                 }
                 else
                     die();
@@ -193,20 +197,44 @@ namespace PassThruLoggerControl
             catch (InvalidEnumException e)
             {
                 Console.WriteLine(e.ToString());
+                Program.CrashLog("recvThread(InvalidEnum)", e);
+                die();
+            }
+            // Catch-all: any other exception (NullReferenceException,
+            // InvalidOperationException from Invoke during shutdown, etc.)
+            // must NOT escape the thread — an unhandled exception on a
+            // managed Thread tears down the whole process silently.
+            catch (Exception e)
+            {
+                Console.WriteLine(e.ToString());
+                Program.CrashLog("recvThread(unexpected)", e);
                 die();
             }
         }
 
         private void catchSocketException(System.Net.Sockets.SocketException e)
         {
-            Console.WriteLine("Socket Error...");
-            if (e.ErrorCode == /*WSAECONNRESET*/0x2746)
+            Console.WriteLine("Socket Error... (code={0})", e.ErrorCode);
+            // 10054 (WSAECONNRESET): connection reset by remote — the DLL
+            //   closed the TCP socket (app exit, DLL unload).
+            // 10053 (WSAECONNABORTED): connection aborted by local software
+            //   — the viewer's own socket was closed during shutdown.
+            // 10004 (WSAEINTR): operation was interrupted.
+            // 995 (ERROR_OPERATION_ABORTED): I/O aborted due to thread exit.
+            // All of these are "expected during shutdown" — don't crash.
+            if (e.ErrorCode == 0x2746 /*WSAECONNRESET*/ ||
+                e.ErrorCode == 0x2745 /*WSAECONNABORTED*/ ||
+                e.ErrorCode == 0x2714 /*WSAEINTR*/ ||
+                e.ErrorCode == 0x3E3  /*ERROR_OPERATION_ABORTED*/)
             {
                 state = CONNSTATE.Disconnected;
-                form.updateConnectionListEntry(this);
+                SafeUpdateConnectionListEntry();
             }
             else
+            {
+                Program.CrashLog("recvThread(socket)", e);
                 die();
+            }
         }
 
         private void checkEnum(Type type, object thing)
@@ -221,9 +249,35 @@ namespace PassThruLoggerControl
         {
             if (closed) return;
             state = CONNSTATE.Error;
-            form.updateConnectionListEntry(this);
-            socket.Close();
+            SafeUpdateConnectionListEntry();
+            try { socket.Close(); } catch { }
             closed = true;
+        }
+
+        /// <summary>
+        /// Update the connection list row without letting an Invoke race
+        /// (form disposing / no handle) throw back into the caller. This is
+        /// the main shutdown-race source for silent exits.
+        /// </summary>
+        private void SafeUpdateConnectionListEntry()
+        {
+            try
+            {
+                if (form == null || form.IsDisposed || !form.IsHandleCreated) return;
+                form.updateConnectionListEntry(this);
+            }
+            catch (InvalidOperationException)
+            {
+                // Form is tearing down (covers ObjectDisposedException too,
+                // which derives from InvalidOperationException).
+            }
+            catch (System.ComponentModel.InvalidAsynchronousStateException)
+            {
+                // "The destination thread no longer exists" — form's UI
+                // thread is gone during shutdown. Derives from
+                // ExternalException, NOT InvalidOperationException, so the
+                // catch above does not cover it.
+            }
         }
 
         internal void start()
