@@ -672,6 +672,21 @@ class ScenarioBuilder:
             if pending and pending[0] is not None:
                 write_msg, write_ts, target_key, svc_idx, svc = pending
                 if self._is_response(write_msg, svc_idx, svc, read_msg):
+                    # Skip responsePending (0x7F <service> 0x78) — the ECU
+                    # sends this to say "I'm processing, wait for the real
+                    # response." The actual positive/negative response follows
+                    # in the next read. Without this skip, the converter would
+                    # capture the responsePending as the reply rule, and the
+                    # replay would send "response pending" forever — the
+                    # actual response (e.g., 0x50 for sessionControl) would
+                    # never be emitted, causing Xentry to time out.
+                    rdata = read_msg.data
+                    if (svc_idx is not None and svc is not None and
+                            svc_idx + 2 < len(rdata) and
+                            rdata[svc_idx] == 0x7F and
+                            rdata[svc_idx + 1] == svc and
+                            rdata[svc_idx + 2] == 0x78):
+                        continue  # skip — keep the write pending for the real response
                     delay_ms = 0
                     if write_ts and ev.timestamp:
                         delta = (ev.timestamp - write_ts).total_seconds() * 1000
