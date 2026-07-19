@@ -77,8 +77,12 @@ void Scheduler::startPeriodic(unsigned long channelId, const Target *target) {
         if (rule.msg.data.len > 0 && rule.msg.data.len <= (int)sizeof(gen.msg.Data))
             memcpy(gen.msg.Data, rule.msg.data.data, rule.msg.data.len);
         gen.intervalMs = instant_ ? rule.intervalMs : rule.intervalMs;
-        // First fire: immediate in instant mode, else after one interval
-        gen.nextFireMs = t + (instant_ ? 0 : rule.intervalMs);
+        // Stagger first fire: 5s startup delay + 50ms per-generator offset.
+        // Without this, all periodic generators fire within ~40ms of Connect,
+        // flooding the rxQueue with ~200 msg/s and burying variant-coding
+        // responses behind thousands of periodic messages.
+        unsigned long stagger = instant_ ? 0 : 5000 + (unsigned long)(i * 50);
+        gen.nextFireMs = t + stagger + (instant_ ? 0 : rule.intervalMs);
         gen.active = true;
         periodics_.push_back(gen);
         g_logger.verbose("Scheduler: periodic started ch=%lu interval=%lums",
