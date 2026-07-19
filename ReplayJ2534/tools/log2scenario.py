@@ -686,7 +686,15 @@ class ScenarioBuilder:
                     pending = None  # later reads in this event are unsolicited
                     paired = True
             if not paired:
-                # Unsolicited read — feed periodic detection only
+                # Skip loopback echoes (TX_INDICATION) and START_OF_MESSAGE
+                # notifications — these are 4-byte CAN-ID-only reads that
+                # appear after every write. Without this filter, they get
+                # falsely detected as periodic messages, flooding the
+                # replay with bogus 4-byte generators that bury real
+                # responses in the rxQueue.
+                if read_msg.rx_status & 0x000B:
+                    continue
+                # Unsolicited real read — feed periodic detection only
                 self._read_seen[ev.channel_id].append((read_msg, ev.timestamp))
 
     def _detect_periodic(self, channel_id, reads, target_key=None):
