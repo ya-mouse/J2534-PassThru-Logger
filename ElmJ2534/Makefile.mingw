@@ -16,6 +16,8 @@ SOURCES = $(SRCDIR)/dllmain.cpp \
           $(SRCDIR)/PortScan.cpp \
           $(SRCDIR)/ElmSession.cpp \
           $(SRCDIR)/ElmDevice.cpp \
+          $(SRCDIR)/ElmDeviceMsgs.cpp \
+          $(SRCDIR)/ElmDeviceFilters.cpp \
           $(SRCDIR)/Logger.cpp
 
 OBJECTS = $(SOURCES:.cpp=.o)

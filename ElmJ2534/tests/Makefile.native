@@ -1,9 +1,22 @@
-# ElmJ2534 ElmProto Tests — Native build (macOS/Linux)
+# ElmJ2534 Core Tests — Native build (macOS/Linux)
 # Usage: make -f ElmJ2534/tests/Makefile.native test
 #
-# ElmProto is sans-IO (no windows.h), so unlike ReplayJ2534's native build
-# this needs no stubs dir and no WIN32 defines — plain host C++11 proves the
-# core has no platform dependency.
+# ElmProto and ElmSession are sans-IO (no windows.h reaches them — ElmLink.h
+# hides the Win32 SerialElmLink behind #ifdef _WIN32), so those two suites need
+# no stubs dir and no WIN32 defines — plain host C++11 proves the core has no
+# platform dependency.
+#
+# ElmDevice is Win32-shaped (CRITICAL_SECTION / CONDITION_VARIABLE /
+# GetTickCount, like ReplayJ2534/Simulator.cpp), so the device suite compiles
+# against tests/stubs/windows.h — a copy of ReplayJ2534's stub extended with
+# the sync + tick primitives. The stub dir goes FIRST on the include path so it
+# wins over any real windows.h.
+#
+# The device suite also pulls in J2534Defs.h, whose __declspec export macros
+# need -fdeclspec: clang requires it, g++ >= 11 accepts it, older g++ does not.
+# FDECLSPEC below probes the compiler, so CXX=clang++ (the default `c++` on
+# macOS) and a modern g++ both work; with an older g++ the probe yields nothing
+# and the device target fails to compile — use clang++ for that suite.
 
 CXX ?= c++
 SRCDIR = ElmJ2534
@@ -12,22 +25,64 @@ OUTDIR = build/tests_native_elm
 
 CXXFLAGS = -Wall -std=c++11 -I$(SRCDIR) -g
 
-TEST_SOURCES = $(TESTDIR)/test_elmproto.cpp \
-               $(SRCDIR)/ElmProto.cpp
+# J2534Defs.h declares the exports with __declspec, which clang only accepts
+# with -fdeclspec (g++ >= 11 accepts it too, older g++ errors on the unknown
+# option). Probe the compiler instead of assuming: the device suite is the only
+# one that includes J2534Defs.h, so the other two keep the bare host flags.
+FDECLSPEC := $(shell echo 'int main(){return 0;}' | \
+             $(CXX) -x c++ -fdeclspec - -o /dev/null >/dev/null 2>&1 && echo -fdeclspec)
 
-TEST_TARGET = $(OUTDIR)/test_elmproto
+DEVICE_CXXFLAGS = -Wall -std=c++11 $(FDECLSPEC) -Wno-ignored-attributes -g \
+                  -I$(TESTDIR)/stubs -I$(TESTDIR) -I$(SRCDIR)
+
+CORE_HEADERS = $(SRCDIR)/ElmProto.h $(SRCDIR)/ElmSession.h $(SRCDIR)/ElmLink.h
+FAKE_LINK = $(TESTDIR)/fake_link.h
+
+PROTO_SOURCES = $(TESTDIR)/test_elmproto.cpp \
+                $(SRCDIR)/ElmProto.cpp
+PROTO_TARGET = $(OUTDIR)/test_elmproto
+
+SESSION_SOURCES = $(TESTDIR)/test_session.cpp \
+                  $(SRCDIR)/ElmSession.cpp \
+                  $(SRCDIR)/ElmProto.cpp
+SESSION_TARGET = $(OUTDIR)/test_session
+
+# No ElmLink.cpp: the fake link is injected, and the Win32 serial half (with
+# its threaded open) is compiled out because _WIN32 is not defined natively.
+DEVICE_SOURCES = $(TESTDIR)/test_device.cpp \
+                 $(SRCDIR)/ElmDevice.cpp \
+                 $(SRCDIR)/ElmDeviceMsgs.cpp \
+                 $(SRCDIR)/ElmDeviceFilters.cpp \
+                 $(SRCDIR)/ElmSession.cpp \
+                 $(SRCDIR)/ElmProto.cpp
+DEVICE_TARGET = $(OUTDIR)/test_device
+DEVICE_HEADERS = $(SRCDIR)/ElmDevice.h $(SRCDIR)/ElmDevicePriv.h \
+                 $(SRCDIR)/Config.h $(SRCDIR)/J2534Defs.h \
+                 $(TESTDIR)/stubs/windows.h
 
 .PHONY: all clean test
 
-all: $(TEST_TARGET)
+all: $(PROTO_TARGET) $(SESSION_TARGET) $(DEVICE_TARGET)
 
-$(TEST_TARGET): $(TEST_SOURCES) $(SRCDIR)/ElmProto.h
+$(PROTO_TARGET): $(PROTO_SOURCES) $(SRCDIR)/ElmProto.h
 	@mkdir -p $(OUTDIR)
-	$(CXX) $(CXXFLAGS) -o $@ $(TEST_SOURCES)
+	$(CXX) $(CXXFLAGS) -o $@ $(PROTO_SOURCES)
 	@echo "Built: $@"
 
-test: $(TEST_TARGET)
-	$(TEST_TARGET)
+$(SESSION_TARGET): $(SESSION_SOURCES) $(CORE_HEADERS) $(FAKE_LINK)
+	@mkdir -p $(OUTDIR)
+	$(CXX) $(CXXFLAGS) -o $@ $(SESSION_SOURCES)
+	@echo "Built: $@"
+
+$(DEVICE_TARGET): $(DEVICE_SOURCES) $(CORE_HEADERS) $(DEVICE_HEADERS) $(FAKE_LINK)
+	@mkdir -p $(OUTDIR)
+	$(CXX) $(DEVICE_CXXFLAGS) -o $@ $(DEVICE_SOURCES)
+	@echo "Built: $@"
+
+test: $(PROTO_TARGET) $(SESSION_TARGET) $(DEVICE_TARGET)
+	$(PROTO_TARGET)
+	$(SESSION_TARGET)
+	$(DEVICE_TARGET)
 
 clean:
 	rm -rf $(OUTDIR)

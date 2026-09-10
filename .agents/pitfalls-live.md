@@ -103,6 +103,56 @@ Before adding or committing a new pitfall entry, verify:
   documentation of the pattern.
 - **Source**: struggle
 
+### P-LIVE-004: Wrap-safe tick deltas — `(int32_t)(deadline - now)`, never `long`
+- **Scope**: ReplayJ2534/ElmJ2534 timing code (condvar deadline loops) built for
+  mingw x86 (Win32, `long` = 32-bit) but ALSO compiled natively on macOS/Linux
+  test hosts (LP64, `long` = 64-bit)
+- **Discovered**: T4b review, 2026-09-11
+- **Symptom**: the native test suite hangs forever inside `readMsgs`' deadline
+  loop (`SleepConditionVariableCS` → `nanosleep` with a ~4-billion-ms request);
+  the Win32 build behaves correctly, so nothing shows up on the target.
+  (Observed mid-refactor of ElmDeviceMsgs.cpp — the shipped code already uses
+  `(int32_t)`; do not "fix" correct call sites.)
+- **Root cause**: the idiom `if ((long)(deadline - now) <= 0) break;` relies on
+  `long` being 32-bit so the wrapped DWORD difference sign-extends to a
+  negative number. On an LP64 host `long` is 64-bit: the unsigned 32-bit
+  difference is zero-extended to a huge POSITIVE value, the break never fires,
+  and the loop sleeps for the wrapped remainder (~49 days).
+- **Workaround**: cast to a fixed-width type — `(int32_t)(deadline - now)` —
+  and keep the arithmetic in DWORD. Applies to every `GetTickCount()` deadline
+  comparison. (Related but distinct: `Simulator.cpp:231-236` has no `long`
+  cast — its `deadline > GetTickCount()` comparison is non-wrap-safe on the
+  TARGET, breaking the wait early at the 49.7-day tick wrap. Live on Win32,
+  needs its own fix.)
+- **Obsoleted by**: n/a — this is an ABI difference between the target and the
+  test host, not a toolchain bug.
+- **Source**: review
+
+### P-LIVE-005: Cached map-value pointers across condvar waits = use-after-free
+- **Scope**: ElmDevice readMsgs (ElmDeviceMsgs.cpp); same shape inherited by
+  ReplayJ2534 Simulator.cpp:218-253 — **follow-up ticket needed there**
+- **Discovered**: T4b review, 2026-09-11
+- **Symptom**: a reader parked in `PassThruReadMsgs` crashes (or silently
+  corrupts the heap) when another thread calls `PassThruDisconnect` /
+  `PassThruClose` while it waits. No repro in single-threaded tests.
+- **Root cause**: `SleepConditionVariableCS` RELEASES the critical section, so
+  teardown can run mid-wait. `channels_.erase(id)` / `channels_.clear()`
+  destroys the `Channel` (and its `std::deque`) that the reader cached as
+  `Channel *ch`; on wake, `ch->rxQueue.empty()` / `pop_front()` dereferences
+  freed memory. This is the standard cancel pattern — any waiter plus any
+  teardown path that erases the waited-on object.
+- **Workaround**: never evaluate through a pointer cached across a lock
+  release. Re-resolve by id (`findChannel(channelId)`) after EVERY wake and
+  again before the delivery loop; treat "gone" as `ERR_INVALID_CHANNEL_ID`
+  with `*pNumMsgs = 0`. Teardown must `WakeAllConditionVariable` AFTER
+  clearing, and a destructor must not `DeleteCriticalSection` while a waiter
+  could be parked (track a waiter count so a violation is visible).
+  Regression test: `readmsgs_cancelled_by_disconnect` in
+  ElmJ2534/tests/test_device.cpp (Win32-only — the native stubs make the lock
+  a no-op, so two threads would not exercise a real park/wake).
+- **Obsoleted by**: n/a — a lifetime rule, not a toolchain limitation.
+- **Source**: review
+
 ---
 
 ## Archive

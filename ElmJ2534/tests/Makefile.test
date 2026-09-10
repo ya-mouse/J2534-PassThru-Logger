@@ -1,0 +1,74 @@
+# ElmJ2534 Tests — Cross-compile with mingw-w64, run on Windows (or Wine)
+# Usage: make -f ElmJ2534/tests/Makefile.test
+#   or: docker run --rm -v "$PWD:/src" -w /src j2534-builder \
+#         make -f ElmJ2534/tests/Makefile.test
+# Mirrors ReplayJ2534/tests/Makefile.test:
+#   - no -march flags (P-LIVE-001: -march=pentium3 segfaults static init)
+#   - -static for full static linking (no runtime DLL deps on the target)
+
+CC = i686-w64-mingw32-g++
+SRCDIR = ElmJ2534
+TESTDIR = $(SRCDIR)/tests
+OUTDIR = build/tests
+
+CFLAGS = -Wall -std=c++11 -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
+         -DWIN32 -I$(SRCDIR) -g -O0
+
+LDFLAGS = -static -ladvapi32
+
+PROTO_SOURCES = $(TESTDIR)/test_elmproto.cpp \
+                $(SRCDIR)/ElmProto.cpp
+PROTO_TARGET = $(OUTDIR)/test_elmproto.exe
+
+# No ElmLink.cpp: FakeElmLink is injected and SerialElmLink is never used,
+# so the Win32 serial half (and its threaded open) stays out of the test exe.
+# Logger.cpp IS linked: ElmSession logs through g_logger under _WIN32.
+SESSION_SOURCES = $(TESTDIR)/test_session.cpp \
+                  $(SRCDIR)/ElmSession.cpp \
+                  $(SRCDIR)/ElmProto.cpp \
+                  $(SRCDIR)/Logger.cpp
+SESSION_TARGET = $(OUTDIR)/test_session.exe
+
+# The device suite exercises the real Win32 half of ElmDevice (CRITICAL_SECTION,
+# CONDITION_VARIABLE, GetTickCount), so it links the serial link, the COM scan
+# and the logger — hence -lsetupapi on top of the session target's deps.
+DEVICE_SOURCES = $(TESTDIR)/test_device.cpp \
+                 $(SRCDIR)/ElmDevice.cpp \
+                 $(SRCDIR)/ElmDeviceMsgs.cpp \
+                 $(SRCDIR)/ElmDeviceFilters.cpp \
+                 $(SRCDIR)/ElmSession.cpp \
+                 $(SRCDIR)/ElmProto.cpp \
+                 $(SRCDIR)/ElmLink.cpp \
+                 $(SRCDIR)/PortScan.cpp \
+                 $(SRCDIR)/Logger.cpp
+DEVICE_TARGET = $(OUTDIR)/test_device.exe
+DEVICE_LDFLAGS = -static -ladvapi32 -lsetupapi
+
+.PHONY: all clean run
+
+all: $(PROTO_TARGET) $(SESSION_TARGET) $(DEVICE_TARGET)
+
+$(PROTO_TARGET): $(PROTO_SOURCES) $(SRCDIR)/ElmProto.h
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $(PROTO_SOURCES) $(LDFLAGS)
+	@echo "Built: $@"
+
+$(SESSION_TARGET): $(SESSION_SOURCES) $(SRCDIR)/ElmSession.h $(SRCDIR)/ElmLink.h $(SRCDIR)/Logger.h $(TESTDIR)/fake_link.h
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $(SESSION_SOURCES) $(LDFLAGS)
+	@echo "Built: $@"
+
+$(DEVICE_TARGET): $(DEVICE_SOURCES) $(SRCDIR)/ElmDevice.h $(SRCDIR)/ElmDevicePriv.h $(SRCDIR)/Config.h $(TESTDIR)/fake_link.h
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $(DEVICE_SOURCES) $(DEVICE_LDFLAGS)
+	@echo "Built: $@"
+
+run: all
+	wine $(PROTO_TARGET)
+	wine $(SESSION_TARGET)
+	wine $(DEVICE_TARGET)
+
+clean:
+	# Only this Makefile's own outputs: build/tests is shared with
+	# Makefile.client (j2534_elm_test.exe), which must survive a test clean.
+	rm -f $(PROTO_TARGET) $(SESSION_TARGET) $(DEVICE_TARGET)

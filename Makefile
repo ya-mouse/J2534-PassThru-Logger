@@ -29,7 +29,7 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser replay elm control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native test-elm test-elm-native
+.PHONY: all dll kvaser replay elm control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native test-elm test-elm-native elm-client
 
 all: dll kvaser replay elm control sample
 
@@ -134,10 +134,17 @@ test-replay-native:
 test-elm: docker-image
 	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
 		make -f ElmJ2534/tests/Makefile.test
-	@echo "→ build/tests/test_elm.exe (run on Windows or via Wine)"
+	@echo "→ build/tests/test_elmproto.exe + test_session.exe + test_device.exe (run on Windows or via Wine)"
 
-# ─── ElmJ2534 ElmProto Tests (native, no Docker) ─────────────────────────────
+# ─── ElmJ2534 Native Test Suites (no Docker) ─────────────────────────────────
 
 test-elm-native:
 	make -f ElmJ2534/tests/Makefile.native test
-	@echo "→ ElmProto tests passed"
+	@echo "→ ElmJ2534 native test suites passed (ElmProto + ElmSession + ElmDevice)"
+
+# ─── ElmJ2534 E2E Bench Client (Docker + mingw-w64) ──────────────────────────
+
+elm-client: docker-image
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f ElmJ2534/tests/Makefile.client
+	@echo "→ build/tests/j2534_elm_test.exe"

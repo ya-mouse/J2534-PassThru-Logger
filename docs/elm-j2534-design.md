@@ -68,7 +68,7 @@ multi-frame VIN `0902` both answer over COM3.
 | `PassThruWriteMsgs` | Per msg: Data[0..3] = big-endian CAN ID, Data[4..] = payload. `setTarget(id)` (ATSH+ATFCSH when changed), send hex payload, read to prompt, classify, reassemble all ISO-TP groups, push TX echo (when `CAN_ID_BOTH`) + responses to channel RX queue. **Synchronous** — the exchange completes before return. `NODATA` is not a write failure: TX succeeded, nothing answered. Bus errors → `ERR_FAILED` after recovery attempt. |
 | `PassThruReadMsgs` | Drain RX queue; block on condition variable up to `Timeout`; empty after timeout → `ERR_TIMEOUT`, `*pNumMsgs=0`. Never exceeds caller's `*pNumMsgs` capacity. |
 | `PassThruStartMsgFilter` | FLOW_CONTROL_FILTER: pattern CAN ID → `ATCRA<resp>`; flow-control msg CAN ID recorded as default request ID. PASS/BLOCK: recorded, applied as RX post-filter. NULL mask/pattern → `ERR_NULL_PARAMETER` (project convention, P-LIVE-002). |
-| `PassThruIoctl` | `READ_VBATT` → `ATRV` (device- or channel-level handle). `CLEAR_RX_BUFFER` → drain queue. `GET_CONFIG`/`SET_CONFIG` → minimal (`DATA_RATE`, `LOOPBACK` report only). Others → `ERR_INVALID_IOCTL_ID`. |
+| `PassThruIoctl` | `READ_VBATT` → `ATRV` (device- or channel-level handle). `CLEAR_RX_BUFFER` → drain queue. `GET_CONFIG` reads the `pInput` SCONFIG_LIST (project convention) → `DATA_RATE=500000`, `LOOPBACK=0`; unknown params → `ERR_INVALID_IOCTL_VALUE`. `SET_CONFIG` accepts `DATA_RATE`/`LOOPBACK`/`ISO15765_BS`/`ISO15765_STMIN` as validated no-ops (the chip owns flow-control timing); unknown params → `ERR_INVALID_IOCTL_VALUE`. `FIVE_BAUD_INIT`/`FAST_INIT` → `ERR_NOT_SUPPORTED` (no K-line). `CLEAR_MSG_FILTERS` → drop channel filters. Others → `ERR_INVALID_IOCTL_ID`. |
 | `PassThruReadVersion` | firmware = ELM banner (`ATI`/`ATZ`), dll/api = fixed version strings. |
 | `PassThruSetProgrammingVoltage` | `ERR_NOT_SUPPORTED`. |
 | Periodic msgs | Accepted, no-op (like ReplayJ2534) — ELM has no free-running TX. |
@@ -77,8 +77,21 @@ multi-frame VIN `0902` both answer over COM3.
 RX `PASSTHRU_MSG` convention (mirrors ReplayJ2534 `Simulator.cpp`):
 `ProtocolID=J2534_ISO15765`, `Data` = 4-byte big-endian response CAN ID +
 reassembled payload, `DataSize = ExtraDataIndex = 4 + payloadLen`,
-`Timestamp` = ms since session start, `RxStatus=0` (TX echo: `TX_MSG_TYPE`,
-4-byte ID only).
+`Timestamp` = ms since session start, `RxStatus=0` (TX echo:
+`TX_MSG_TYPE|TX_INDICATION` = 0x0009, 4-byte ID only — matches the real
+device behavior recorded in ReplayJ2534 commit 835f6b5).
+
+`START_OF_MESSAGE` is **not emitted**: the ELM path hands the app an
+already-reassembled ISO-TP message, so there is no wire-level arrival to
+bracket (Simulator emits SOM because it fakes wire-level arrival). Gate:
+if Xentry is ever run against ElmJ2534.dll and times out on multi-ECU
+discovery, re-evaluate (SOM was mandatory for Xentry on the replay path).
+
+FLOW_CONTROL filter lifecycle: the pattern CAN ID becomes the expected
+response ID (`ATCRA`). When the filter is removed or was never installed,
+the session must emit `ATCRA000` (accept-all) if a CRA was previously
+set — **omitting** ATCRA leaves the chip's stale filter in force and the
+response side silently shut.
 
 ## Configuration
 
@@ -86,8 +99,11 @@ Priority: env `ELM_J2534_PORT` → registry `HKCU\Software\ElmJ2534`
 (`ComPort` REG_SZ, `BaudRate` REG_DWORD default 38400 — ignored by BT SPP
 but the port wants one, `LogLevel`, `LogOutputPath`, `OpenTimeoutSec`
 default 15) → best-effort auto-detect (SetupDi `GUID_DEVINTERFACE_COMPORT`,
-pick `BTHENUM` hardware id without `LOCALMFG`; if SetupDi misbehaves under
-mingw, auto-detect may be dropped — env/registry always work).
+pick `BTHENUM` hardware id without `LOCALMFG`, deterministic sorted pick
+when several pairings exist; if SetupDi misbehaves under mingw,
+auto-detect may be dropped — env/registry always work).
+Env overrides: `ELM_J2534_BAUD`, `ELM_J2534_LOGLEVEL`,
+`ELM_J2534_OPENTIMEOUT`. `\\.\COMx` spellings normalize to `COMx`.
 
 ## File layout
 
@@ -102,7 +118,11 @@ ElmJ2534/
 ├── ElmLink.h/.cpp     # IElmLink interface + SerialElmLink (Win32 COM, threaded open)
 ├── PortScan.h/.cpp    # best-effort BTHENUM COM auto-detect (SetupDi)
 ├── ElmSession.h/.cpp  # exchange loop, initialise, setTarget, request, recover
-├── ElmDevice.h/.cpp   # J2534 state machine (device/channels/filters/RX queues)
+├── ElmDevice.h          # J2534 state machine (device/channels/filters/RX queues)
+├── ElmDevicePriv.h      # shared plumbing for the split TUs (BE id helpers, log shim)
+├── ElmDevice.cpp        # lifecycle: open/close/connect/disconnect/version
+├── ElmDeviceMsgs.cpp    # writeMsgs/readMsgs, exchange recovery, RX queue/echo
+├── ElmDeviceFilters.cpp # msg filters + ioctl
 ├── J2534Api.cpp       # 14 wrappers → g_device (ReplayJ2534 pattern)
 ├── dllmain.cpp        # DllMain: config load + logger only (NO port open)
 ├── install.reg        # PassThruSupport.04.04\ElmJ2534 (ISO15765=1) + HKCU config
@@ -110,10 +130,15 @@ ElmJ2534/
 ├── Makefile.mingw     # x86, no -march=pentium3 (P-LIVE-001), -ladvapi32 -lsetupapi
 └── tests/
     ├── test_elmproto.cpp    # native (clang++ on macOS): parser/classifier/assembler
-    ├── Makefile.native
-    ├── test_session.cpp     # FakeLink-driven session + device tests (mingw)
+    ├── test_session.cpp     # native FakeLink suite: exchange/init/setTarget/recover
+    ├── test_device.cpp      # native FakeLink suite: J2534 state machine (+ Win32-only
+    │                        #   two-thread readMsgs-cancel regression, mingw build)
+    ├── fake_link.h          # scripted FakeElmLink shared by session + device suites
+    ├── stubs/windows.h      # Win32 stubs (lock/condvar/tick) for native device tests
     ├── j2534_elm_test.cpp   # E2E client: 0100 single-frame + 0902 multi-frame VIN
-    └── Makefile.test
+    ├── Makefile.native      # native suites (no Docker)
+    ├── Makefile.test        # mingw cross-build of the three test exes
+    └── Makefile.client      # mingw cross-build of j2534_elm_test.exe
 ```
 
 ## ElmProto interfaces (T1 contract)
@@ -157,7 +182,9 @@ bool elmParseVoltage(const std::string &text, int &millivolts); // "12.3V" → 1
 struct ElmStep { const char *command; bool required; const char *purpose; };
 const std::vector<ElmStep> &elmInitSequence();
 // ATSH<req> ATCRA<resp> ATFCSH<req> ATFCSD300000 ATFCSM1
-// (ATCRA omitted when responseCanId == 0)
+// (ATCRA omitted when responseCanId == 0 — the SESSION layer then emits
+//  ATCRA000 itself when a CRA was previously set, so a stale chip filter
+//  can never survive a filter removal)
 std::vector<ElmStep> elmAddressingSequence(uint32_t requestCanId,
                                            uint32_t responseCanId);
 ```
@@ -210,7 +237,17 @@ classify until `Prompt` or deadline; deadline with no prompt = link wedged
   `J2534_ISO15765=0x06`, `READ_VBATT=0x03`, `CAN_ID_BOTH=0x0800`,
   `FLOW_CONTROL_FILTER=0x03`, `ISO15765_FRAME_PAD=0x0040`.
 - All ELM exchanges serialize under one lock (half-duplex hardware).
-- No blocking work in `DllMain` (config load + logger init only).
+- No blocking work in `DllMain` ATTACH (config load + logger init only).
+  DETACH carve-out: when the app skipped `PassThruClose`, a **bounded**
+  (≤2 s worst case: write timeout + 1 s read deadline) `ATLP` + close is
+  allowed on the `FreeLibrary` path only
+  (`lpReserved == NULL`, via `TryEnterCriticalSection` — never block on a
+  lock another terminated thread may hold). On process exit
+  (`lpReserved != NULL`) the OS has already terminated other threads:
+  `CloseHandle` only, no exchange, no lock — otherwise exit hangs.
+- Wrap-safe tick deltas: `(int32_t)(deadline - now)` with DWORD
+  arithmetic — never `long` (64-bit on LP64 native hosts misreads wrapped
+  diffs as huge positives; see pitfalls-live).
 
 ## E2E acceptance (bench is live)
 
