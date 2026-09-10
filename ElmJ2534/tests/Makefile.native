@@ -1,0 +1,33 @@
+# ElmJ2534 ElmProto Tests — Native build (macOS/Linux)
+# Usage: make -f ElmJ2534/tests/Makefile.native test
+#
+# ElmProto is sans-IO (no windows.h), so unlike ReplayJ2534's native build
+# this needs no stubs dir and no WIN32 defines — plain host C++11 proves the
+# core has no platform dependency.
+
+CXX ?= c++
+SRCDIR = ElmJ2534
+TESTDIR = $(SRCDIR)/tests
+OUTDIR = build/tests_native_elm
+
+CXXFLAGS = -Wall -std=c++11 -I$(SRCDIR) -g
+
+TEST_SOURCES = $(TESTDIR)/test_elmproto.cpp \
+               $(SRCDIR)/ElmProto.cpp
+
+TEST_TARGET = $(OUTDIR)/test_elmproto
+
+.PHONY: all clean test
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SOURCES) $(SRCDIR)/ElmProto.h
+	@mkdir -p $(OUTDIR)
+	$(CXX) $(CXXFLAGS) -o $@ $(TEST_SOURCES)
+	@echo "Built: $@"
+
+test: $(TEST_TARGET)
+	$(TEST_TARGET)
+
+clean:
+	rm -rf $(OUTDIR)
