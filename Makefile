@@ -29,9 +29,9 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser replay control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native
+.PHONY: all dll kvaser replay elm control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native test-elm test-elm-native
 
-all: dll kvaser replay control sample
+all: dll kvaser replay elm control sample
 
 # ─── C++ DLL (Docker + mingw-w64) ────────────────────────────────────────────
 
@@ -69,6 +69,17 @@ replay: docker-image
 		EXTRA_CXXFLAGS="$(MINGW_OPT)"
 	@cp ReplayJ2534/scenario.json $(OUTDIR)/
 	@echo "→ $(OUTDIR)/ReplayJ2534.dll + scenario.json"
+
+# ─── ElmJ2534 DLL (Docker + mingw-w64) ───────────────────────────────────────
+
+elm: docker-image
+	@mkdir -p $(OUTDIR)
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f ElmJ2534/Makefile.mingw \
+		OUTDIR=$(OUTDIR) \
+		EXTRA_CXXFLAGS="$(MINGW_OPT)"
+	@cp ElmJ2534/install.reg ElmJ2534/uninstall.reg $(OUTDIR)/
+	@echo "→ $(OUTDIR)/ElmJ2534.dll + install.reg + uninstall.reg"
 
 # ─── C# PassThruLoggerControl ────────────────────────────────────────────────
 
@@ -117,3 +128,16 @@ test-replay: docker-image
 test-replay-native:
 	make -f ReplayJ2534/tests/Makefile.native test
 	@echo "→ ConfigStore tests passed"
+
+# ─── ElmJ2534 Unit Tests (compile only — run on Windows or with Wine) ────────
+
+test-elm: docker-image
+	docker run --rm -v "$(CURDIR):/src" $(DOCKER_IMAGE) \
+		make -f ElmJ2534/tests/Makefile.test
+	@echo "→ build/tests/test_elm.exe (run on Windows or via Wine)"
+
+# ─── ElmJ2534 ElmProto Tests (native, no Docker) ─────────────────────────────
+
+test-elm-native:
+	make -f ElmJ2534/tests/Makefile.native test
+	@echo "→ ElmProto tests passed"

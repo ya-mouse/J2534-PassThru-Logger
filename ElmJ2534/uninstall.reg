@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+; Unregister ElmJ2534 from J2534 PassThru device list
+; Run as Administrator to remove.
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\PassThruSupport.04.04\ElmJ2534]
+[-HKEY_LOCAL_MACHINE\SOFTWARE\PassThruSupport.04.04\ElmJ2534]
+[-HKEY_CURRENT_USER\SOFTWARE\ElmJ2534]
