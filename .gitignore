@@ -327,3 +327,6 @@ build/
 # Object files from cross-compilation
 *.o
 *.d
+
+# Runtime log captures from bench sessions (crash logs, .jsonl captures)
+logs/
