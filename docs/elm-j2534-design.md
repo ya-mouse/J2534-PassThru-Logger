@@ -251,6 +251,9 @@ classify until `Prompt` or deadline; deadline with no prompt = link wedged
 
 ## E2E acceptance (bench is live)
 
+**Bench-verified 2026-09-11: 4/4 PASS** (procedure:
+`.agents/knowledge/workflows/elm327-bench-e2e.md`).
+
 1. `make test-elm-native` — parser/classifier/assembler tests pass on macOS.
 2. `make elm` — Docker mingw build → `build/Release/ElmJ2534.dll`.
 3. `make test-elm` — session/device FakeLink tests build; run on Windows.

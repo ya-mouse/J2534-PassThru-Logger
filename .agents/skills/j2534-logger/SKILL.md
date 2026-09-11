@@ -233,6 +233,7 @@ Diagnostic App ──DLL calls──▶ PassThruLogger.dll ──DLL calls──
 | SampleClient/ | C# | Test client for development (sends synthetic messages) |
 | KvaserDirect/ | C++ | Direct J2534 DLL using Kvaser CANlib (no proxy, talks to real CAN hardware) |
 | ReplayJ2534/ | C++ | Scenario-driven replay DLL — simulates ECU replies from JSON config, no hardware needed |
+| ElmJ2534/ | C++ | ELM327 Bluetooth J2534 DLL — drives real OBD adapters via COM port (ISO15765 only) |
 
 ---
 
@@ -318,11 +319,15 @@ using (var entry = reg32.CreateSubKey(@"Software\Passthru Logger"))
 
 **C++ DLLs (mingw cross-compile via Docker):**
 ```bash
-make                    # all: PassThruLogger + KvaserDirect + ReplayJ2534 + C# apps
+make                    # all: PassThruLogger + KvaserDirect + ReplayJ2534 + ElmJ2534 + C# apps
 make replay             # ReplayJ2534 DLL only → build/Release/ReplayJ2534.dll
 make kvaser             # KvaserDirect DLL only
+make elm                # ElmJ2534 DLL only → build/Release/ElmJ2534.dll + install/uninstall.reg
+make elm-client         # ElmJ2534 E2E bench client → build/tests/j2534_elm_test.exe
 make test-replay        # ReplayJ2534 test exe (run on Windows or Wine)
 make test-replay-native # ConfigStore native tests (macOS/Linux, no Docker)
+make test-elm           # ElmJ2534 test exes (run on Windows or Wine)
+make test-elm-native    # ElmJ2534 native suites (macOS/Linux, no Docker)
 ```
 
 **C# apps (MSBuild or dotnet):**
@@ -350,6 +355,25 @@ wine build/tests/test_simulator.exe
 **ConfigStore native tests** (11 tests, runs on macOS/Linux without Docker):
 ```bash
 make test-replay-native
+```
+
+**ElmJ2534 native tests** (73 tests: ElmProto 34 + ElmSession 20 + ElmDevice 19,
+no Docker — sans-IO core compiles natively via tests/stubs):
+```bash
+make test-elm-native
+```
+
+**ElmJ2534 Windows tests** (adds the Win32-only two-thread readMsgs-cancel
+regression — 20 device tests there):
+```bash
+make test-elm
+# then on Windows: test_elmproto.exe / test_session.exe / test_device.exe
+```
+
+**ElmJ2534 E2E bench test** (full procedure: `.agents/knowledge/workflows/elm327-bench-e2e.md`):
+```bash
+# Mac: board in adapter mode + simulation live
+# Windows: j2534_elm_test.exe ElmJ2534.dll → 0100 single-frame + 0902 multi-frame VIN
 ```
 
 **ReplayJ2534 integration test** (on Windows with real DLL):
@@ -487,6 +511,25 @@ Key gotchas (detailed in the workflow article):
 │   │   └── stubs/windows.h          # Win32 stubs for native testing
 │   └── tools/
 │       └── log2scenario.py          # Convert .jsonl logs → scenario.json
+├── ElmJ2534/                        # C++ ELM327 Bluetooth J2534 DLL
+│   ├── dllmain.cpp                  # DLL entry: config load (env→registry→scan), logger
+│   ├── J2534Api.cpp                 # 14 J2534 API wrappers → ElmDevice calls
+│   ├── ElmDevice*.cpp/.h            # J2534 state machine (3 TUs + private header)
+│   ├── ElmSession.cpp/.h            # ELM327 conversation: exchange/init/setTarget/recover
+│   ├── ElmProto.cpp/.h              # Sans-IO core: parser, classifier, ISO-TP assembler
+│   ├── ElmLink.cpp/.h               # IElmLink + Win32 serial (threaded deadline open)
+│   ├── PortScan.cpp/.h              # BTHENUM COM auto-detect (LOCALMFG excluded)
+│   ├── J2534Defs.h / Config.h / Logger.cpp/.h / exports.def
+│   ├── install.reg / uninstall.reg  # J2534 registration + HKCU config (ComPort)
+│   ├── Makefile.mingw               # DLL build rules
+│   └── tests/                       # 73 native tests + Win32 regression + E2E client
+│       ├── test_elmproto.cpp        # 34-test protocol core suite (native)
+│       ├── test_session.cpp         # 20-test FakeLink session suite (native)
+│       ├── test_device.cpp          # 19-test device suite (+1 Win32-only thread test)
+│       ├── fake_link.h              # Scripted FakeElmLink (shared)
+│       ├── j2534_elm_test.cpp       # E2E bench client (0100 + 0902 VIN on 7DF/7E8)
+│       ├── stubs/windows.h          # Win32 stubs for native testing
+│       └── Makefile.native/.test/.client
 ├── PassThruLoggerControl/           # C# WinForms control/viewer app
 │   ├── Program.cs                   # Entry point
 │   ├── J2534LogController.cs        # Main form: TCP server + GUI
@@ -559,6 +602,12 @@ if (writeParamPointer(pDeviceID))   // serializes NULL/NOTNULL, returns true if 
   ConfigStore, Simulator state machine, IOCTL scoping, ReadMsgs/WriteMsgs
   reply matching, and periodic generators. 11-test native suite
   (`test_configstore.cpp`) for ConfigStore JSON parsing.
+- **ElmJ2534**: 73 native tests (`make test-elm-native`, no Docker):
+  34 protocol-core (`test_elmproto.cpp`), 20 FakeLink session
+  (`test_session.cpp`), 19 device state machine (`test_device.cpp`).
+  The mingw build adds a Win32-only two-thread readMsgs-cancel regression
+  (20 device tests). E2E: `j2534_elm_test.exe` against the live bench —
+  see `.agents/knowledge/workflows/elm327-bench-e2e.md`.
 - **KvaserDirect**: Unit tests for handle management and ISO-TP engine.
 - **PassThruLogger**: No automated tests — use `SampleClient` for manual
   protocol verification.
