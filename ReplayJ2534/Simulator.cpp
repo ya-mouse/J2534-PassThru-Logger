@@ -287,7 +287,7 @@ long Simulator::writeMsgs(unsigned long channelId, PASSTHRU_MSG *pMsg,
 
         if (!ch->target) continue;
         // First-match-wins: a real ECU answers a request once. Parity with
-        // CanDroid ReplayTransport.kt:129-141 and candroid-fw index.rs
+        // CanDroid ReplayTransport.matchRule and candroid-fw index.rs
         // Index::find, which both take the first matching rule in document
         // order. ch->target->replies is a std::vector filled by parseTargets
         // in JSON array order, so iteration order == document order;

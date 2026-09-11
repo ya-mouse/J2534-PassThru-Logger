@@ -535,9 +535,9 @@ bool ConfigStore::parseReply(const rjson::Value &v, ReplyRule &rule) {
         // Declared-but-empty sequence[] still downgrades to single mode.
         if (!rule.sequenceData.empty()) {
             rule.responseMode = RESPONSE_SEQUENCE;
-            // Default 600 ms = CanDroid's default (ScenarioLoader.kt:72) and
-            // the authoring-doc example; candroid-fw's 0 is the outlier
-            // (cross-repo follow-up, not fixed here).
+            // Default 600 ms — the canonical cross-repo default: CanDroid's
+            // DEFAULT_TIME_WINDOW_MS and candroid-fw's parser both landed
+            // on it in the 2026-09-11 alignment pass.
             rule.timeWindowMs = (unsigned long)r->getNum("timeWindowMs", 600);
         }
     }

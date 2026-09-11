@@ -1,10 +1,12 @@
 # ReplayJ2534 Scenario Authoring & Log Conversion
 
-> **Synced superset of CanDroid's copy as of 2026-09-11.** Sections describing
-> shared semantics (matching, sequence mode, hex parsing, capacity) were
-> aligned across ReplayJ2534 (C++), CanDroid `ReplayTransport` (Kotlin) and
-> candroid-fw `scenario-core` (Rust) in that pass; this copy carries extra
-> ReplayJ2534-specific detail and will legitimately differ from CanDroid's.
+> **Canonical copy — synced to CanDroid as of 2026-09-11** (sibling copy:
+> `../CanDroid/.agents/knowledge/workflows/replay-scenario-authoring.md`).
+> Bodies are kept byte-identical across the two repos; only this header
+> differs. Shared semantics (matching, sequence mode, hex parsing,
+> capacity) were aligned across ReplayJ2534 (C++), CanDroid
+> `ReplayTransport` (Kotlin) and candroid-fw `scenario-core` (Rust) in
+> that pass.
 
 ## When to Use
 
@@ -78,12 +80,14 @@ specification. Key rules:
   file at load.
 - **`output`**: `"auto"` (synthesize), hex byte string, or omitted.
 - **`scope`**: `"device"`, `"channel"`, or `"any"`.
-- **Hex data strings**: separator tolerance differs per parser — the C++
-  `ConfigStore::parseHexBytes` ignores ANY non-hex character (`-`, spaces,
-  `:`), CanDroid's `HexCodec.parseHex` splits on `-` ONLY (anything else
-  throws), candroid-fw accepts `-`, space, `:`, `,`, tab, CR, LF as
-  separators (`hex.rs:40-42`). **Authoring guidance: always use dashes**
-  (`"00-00-07-E0-21-03"`) — the only separator every parser accepts.
+- **Hex data strings**: the C++ `ConfigStore::parseHexBytes` and CanDroid's
+  `HexCodec.parseHex` mirror each other — ANY non-hex character is a
+  separator, a dangling odd nibble becomes a final byte, empty input is a
+  catch-all pattern, neither throws. candroid-fw is stricter: it accepts
+  `-`, space, `:`, `,`, tab, CR, LF as separators (`hex.rs:40-42`) and
+  ERRORS on an odd digit count or any other character. **Authoring
+  guidance: always use dashes** (`"00-00-07-E0-21-03"`) with an even
+  number of hex digits per byte — the only style every parser accepts.
 - **Match mode**: `"prefix"` (default) or `"exact"`.
 - **Response mode**: sequence mode is detected by the PRESENCE of a
   non-empty `sequence[]` array — the `"mode"` key is informational only
@@ -93,17 +97,20 @@ specification. Key rules:
 
 All three replay engines answer a write from the FIRST matching rule in
 **document order** and skip later matches (ReplayJ2534
-`Simulator.cpp:289-341`, CanDroid `ReplayTransport.kt:129-141`, candroid-fw
+`Simulator.cpp:289-341`, CanDroid `ReplayTransport.matchRule`, candroid-fw
 `index.rs` `Index::find`) — a real ECU answers a request once. For
 hand-authored scenarios:
 
 - Put **specific rules before general prefixes**: a broad
   `"00-00-07-E0-22"` rule placed first shadows every `22-xx` rule after it.
-- A rule with empty/missing match data matches EVERY write
-  (`Simulator::matchReply`) — ReplayJ2534 only: candroid-fw skips and
-  counts a pattern-less rule at load (`build.rs:156-159`), CanDroid NPEs
-  on a missing `match.data` (`ScenarioLoader.kt:63`). Place it last, if
-  at all.
+- A rule with EMPTY match data (`"data": ""`) is a live catch-all in
+  ReplayJ2534 and CanDroid (`Simulator::matchReply`; CanDroid
+  `ReplayTransport.matchRule` — an empty prefix matches every request).
+  A rule whose `match` object or `match.data` key is MISSING entirely is
+  skipped and counted (CanDroid `Scenario.skippedRules`); candroid-fw
+  skips and counts a pattern-less rule at load too (the skip-and-count
+  path in `build.rs`). Place a catch-all last, if at all — and know it
+  never catches on the firmware.
 - `log2scenario.py` enforces this itself: it emits rules sorted
   longest-match-first (stable), checks collapse candidates against ALL
   replies including sequences, and fails the conversion outright if any
@@ -168,9 +175,11 @@ log (before sampling), ensuring burst reads collapse but spread reads
 advance. You can override `timeWindowMs` by hand-editing the scenario.
 
 **Default `timeWindowMs`**: 600 ms when the key is absent — the canonical
-cross-repo default (CanDroid `ScenarioLoader.kt:72`; ReplayJ2534
-`ConfigStore.cpp:538-542` since the 2026-09-11 alignment, previously
-1000). candroid-fw currently defaults to 0 (cross-repo follow-up).
+cross-repo default, identical in all three engines since the 2026-09-11
+alignment (CanDroid `ScenarioLoader.DEFAULT_TIME_WINDOW_MS`; ReplayJ2534
+`ConfigStore.cpp:538-542`, previously 1000; candroid-fw `build.rs`,
+previously 0). An EXPLICIT `"timeWindowMs": 0` still means advance-on-
+every-request everywhere (that is what instant mode uses).
 
 **Instant mode**: when `REPLAY_J2534_INSTANT=1`, `timeWindowMs` is
 treated as 0 — every read advances one step. Useful for testing the
@@ -179,25 +188,25 @@ sequence machinery without real-time waits.
 **Cursor scope**: the sequence cursor is per-connection AND per-rule, and
 resets on disconnect in all three engines — ReplayJ2534 keeps `seqStates`
 inside the `Channel` object, which is destroyed on disconnect
-(`Simulator.h:65`); CanDroid clears its `seqStates` map in `disconnect()`
-(`ReplayTransport.kt:60,117`); candroid-fw exposes `Index::reset_cursors`
+(`Simulator.h:65`); CanDroid clears its `seqStates` map in `disconnect()`;
+candroid-fw exposes `Index::reset_cursors`
 for the firmware to call on disconnect (`index.rs:243`). A reconnect
 always restarts at `sequence[0]`.
 
 **Detection by presence**: a rule enters sequence mode when its
 `response` carries a non-empty `sequence[]` array, REGARDLESS of the
 `"mode"` key — the behavior of all three engines (ReplayJ2534
-`ConfigStore.cpp:521-542`, CanDroid `ScenarioLoader.kt:66`, candroid-fw
-`build.rs:106`). Before the 2026-09-11 alignment, C++ required
+`ConfigStore.cpp:521-542`, CanDroid `ScenarioLoader`, candroid-fw
+`build.rs` sequence arm). Before the 2026-09-11 alignment, C++ required
 `"mode":"sequence"` and answered a sequence-without-mode rule with a
-0-byte message. An EMPTY or missing `sequence` array diverges per
-engine: **ReplayJ2534 downgrades the rule to single mode** using
-`response.data` (`ConfigStore.cpp:535`); CanDroid enters sequence mode
-with an empty list and crashes on the first request (`sequence!![0]` →
-IndexOutOfBoundsException, `% 0` in `advance` on later ones);
-candroid-fw indexes it with count 0 and answers nothing (`sequence.rs`
-`advance` returns 0 for `len == 0`, and no element resolves). Do not
-ship empty `sequence` arrays.
+0-byte message. An EMPTY `sequence` array **downgrades the rule to
+single mode** using `response.data` in all three engines (C++
+`ConfigStore.cpp:535`; CanDroid mirrors it in `ScenarioLoader` with a
+defensive guard in `ReplayTransport.getResponse`; candroid-fw resolves
+it at parse time in `build.rs`, key-order independent). Remaining edge
+divergence: empty sequence AND no `data` — candroid-fw and CanDroid skip
+and count the rule; ReplayJ2534 keeps it as a single rule that answers a
+0-length message. Still: do not ship empty `sequence` arrays.
 
 ### emitEcho — the 3-message response cycle
 
@@ -225,7 +234,7 @@ Periodic generators do NOT fire immediately on connect. The first fire is
 `5000 + i·50 ms + intervalMs` after connect, where `i` is the generator's
 index within the target (`Scheduler.cpp:80-85`). CanDroid applies the same
 formula but counts `i` as a GLOBAL index across all targets
-(`ReplayTransport.kt:194-200`) — multi-target scenarios therefore stagger
+(`ReplayTransport.startPeriodicGenerators`) — multi-target scenarios therefore stagger
 slightly differently between engines. Without the stagger, every generator
 fires within ~40 ms of connect and buries request/response traffic in the
 rxQueue. Instant mode removes the stagger (first fire immediate) — tests
@@ -243,9 +252,11 @@ asserting periodic content must run in instant mode or wait out the ~5 s.
 
 Scenarios that fit the candroid-fw column replay identically on all three
 engines, with two caveats: candroid-fw's parser is KEY-ORDER dependent
-when a response carries BOTH `data` and `sequence` — the last key seen
-wins (`build.rs:96-137`) — so emit one or the other, never both; and the
-startup-stagger index scope differs (per-target vs. global, see above).
+when a response carries BOTH `data` and a NON-EMPTY `sequence` — the last
+key seen wins (`build.rs` response-key loop) — so emit one or the other, never both (an
+EMPTY `sequence` is exempt: it downgrades to the data single in any
+order); and the startup-stagger index scope differs (per-target vs.
+global, see above).
 Over-capacity rules are skipped (and counted/reported at load) on the
 firmware, not rejected — the host engines accept them, so a scenario can
 silently behave differently on the device. Keep generated scenarios
@@ -268,8 +279,9 @@ within the firmware limits when they are meant for candroid-fw.
     `"exact"` for full-frame matching.
   - Rule order — first match wins: put specific rules before general
     prefixes (see "Rule ordering" above).
-  - Hex strings — always dash-separated; only the C++ parser tolerates
-    other separators, CanDroid throws on them.
+  - Hex strings — always dash-separated with even digit pairs; C++ and
+    CanDroid tolerate any separator, candroid-fw errors on odd digit
+    counts and unknown characters.
 - The `preferredChannelId` should match what the real client expects.
   Xentry/open-port uses channel ID 2.
 - Add the standard state machine (CLOSED↔OPENED) unless you need
@@ -323,9 +335,11 @@ scenario path (takes priority over registry).
   warning (ConfigStore.cpp:549-566) — before the 2026-09-11 alignment a
   missing `msg` dereferenced NULL and crashed the host app at load, and a
   0-length payload would flood the rxQueue with empty frames every
-  interval. An unknown IOCTL `return` name, by contrast, still fails the
-  WHOLE file — which is why the converter validates names before
-  emitting.
+  interval. CanDroid now skips-and-counts the same cases (plus periodic
+  data <4 bytes, which could never carry a CAN ID); candroid-fw has no
+  periodic engine. An unknown IOCTL `return` name, by contrast, still
+  fails the WHOLE file — which is why the converter validates names
+  before emitting.
 - **Wine/arm64 incompatibility**: The mingw-built `test_simulator.exe`
   cannot run under Wine on arm64 (crashes with "Unhandled illegal
   instruction"). Test on real Windows or x86 Wine.
