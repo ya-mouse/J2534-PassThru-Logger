@@ -518,21 +518,27 @@ bool ConfigStore::parseReply(const rjson::Value &v, ReplyRule &rule) {
     if (const rjson::Value *r = v.find("response")) {
         parseMsgSpec(*r, rule.response);
         rule.delayMs = (unsigned long)r->getNum("delayMs", 0);
-        const char *rm = r->getCstr("mode", "single");
-        if (strcmp(rm, "sequence") == 0) {
-            rule.responseMode = RESPONSE_SEQUENCE;
-            rule.timeWindowMs = (unsigned long)r->getNum("timeWindowMs", 1000);
-            if (const rjson::Value *seq = r->find("sequence")) {
-                if (seq->type == rjson::T_ARR) {
-                    for (size_t i = 0; i < seq->arr.size(); i++) {
-                        HexBytes hb;
-                        parseHexBytes(seq->arr[i], hb);
-                        rule.sequenceData.push_back(hb);
-                    }
+        // Sequence mode is detected by a non-empty sequence[], not by "mode"
+        // — parity with CanDroid ScenarioLoader.kt:66 and candroid-fw
+        // build.rs:106. The old mode-only check treated a rule carrying
+        // sequence[] without "mode" as single and silently replied with the
+        // (empty) response.data — a 0-byte message.
+        if (const rjson::Value *seq = r->find("sequence")) {
+            if (seq->type == rjson::T_ARR) {
+                for (size_t i = 0; i < seq->arr.size(); i++) {
+                    HexBytes hb;
+                    parseHexBytes(seq->arr[i], hb);
+                    rule.sequenceData.push_back(hb);
                 }
             }
-            if (rule.sequenceData.empty())
-                rule.responseMode = RESPONSE_SINGLE;
+        }
+        // Declared-but-empty sequence[] still downgrades to single mode.
+        if (!rule.sequenceData.empty()) {
+            rule.responseMode = RESPONSE_SEQUENCE;
+            // Default 600 ms = CanDroid's default (ScenarioLoader.kt:72) and
+            // the authoring-doc example; candroid-fw's 0 is the outlier
+            // (cross-repo follow-up, not fixed here).
+            rule.timeWindowMs = (unsigned long)r->getNum("timeWindowMs", 600);
         }
     }
     return true;
@@ -540,8 +546,24 @@ bool ConfigStore::parseReply(const rjson::Value &v, ReplyRule &rule) {
 
 bool ConfigStore::parsePeriodic(const rjson::Value &v, PeriodicRule &rule) {
     memset(&rule, 0, sizeof(rule));
+    // Guard: *v.find("msg") dereferenced NULL when a periodic entry lacked
+    // "msg", crashing the host app at scenario load. Returning false makes
+    // parseTargets drop just this entry — the same skip-malformed convention
+    // parseIoctls/parseStates use (`continue` on non-object entries); one bad
+    // entry must not fail the whole file.
+    const rjson::Value *msg = v.find("msg");
+    if (!msg || msg->type != rjson::T_OBJ || !msg->find("data")) {
+        g_logger.verbose("ConfigStore: skipping periodic entry without msg/data");
+        return false;
+    }
     rule.intervalMs = (unsigned long)v.getNum("intervalMs", 1000);
-    parseMsgSpec(*v.find("msg"), rule.msg);
+    parseMsgSpec(*msg, rule.msg);
+    // A 0-length payload would fire empty frames into the rxQueue every
+    // interval — same skip convention as the missing-msg case above.
+    if (rule.msg.data.len == 0) {
+        g_logger.verbose("ConfigStore: skipping periodic entry with empty msg.data");
+        return false;
+    }
     const char *startOn = v.getCstr("startOn", "connect");
     rule.startOnConnect = (strcmp(startOn, "connect") == 0);
     const char *stopOn = v.getCstr("stopOn", "disconnect");
@@ -554,7 +576,9 @@ bool ConfigStore::parseTargets(const rjson::Value &v) {
     for (size_t i = 0; i < v.arr.size(); i++) {
         const rjson::Value &t = v.arr[i];
         if (t.type != rjson::T_OBJ) continue;
-        Target tgt;
+        Target tgt{};  // value-initialize: omitted match keys must read as
+                       // "don't care" (hasFlags/hasBaud=false), not stack
+                       // garbage that silently rejects findTarget()
         tgt.name = t.getCstr("name", "unnamed");
         tgt.preferredChannelId = (unsigned long)t.getNum("preferredChannelId", 0);
 

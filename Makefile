@@ -29,7 +29,7 @@ RID ?= win-x64
 DOTNET_PUBLISH = $(DOTNET) publish -c $(DOTNET_CONFIG) -r $(RID) --self-contained false \
 	--nologo -v quiet
 
-.PHONY: all dll kvaser replay elm control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native test-elm test-elm-native elm-client
+.PHONY: all dll kvaser replay elm control sample clean docker-image test-kvaser tools-kvaser test-replay test-replay-native test-replay-roundtrip test-replay-converter test-elm test-elm-native elm-client
 
 all: dll kvaser replay elm control sample
 
@@ -128,6 +128,18 @@ test-replay: docker-image
 test-replay-native:
 	make -f ReplayJ2534/tests/Makefile.native test
 	@echo "→ ConfigStore tests passed"
+
+# ─── ReplayJ2534 log2scenario Round-Trip (converter output must parse) ──────
+
+test-replay-roundtrip:
+	make -f ReplayJ2534/tests/Makefile.native roundtrip
+	@echo "→ log2scenario output loads through ConfigStore"
+
+# ─── ReplayJ2534 Converter Tests (rule order under first-match-wins) ────────
+
+test-replay-converter:
+	make -f ReplayJ2534/tests/Makefile.native test-converter
+	@echo "→ log2scenario converter tests passed"
 
 # ─── ElmJ2534 Unit Tests (compile only — run on Windows or with Wine) ────────
 

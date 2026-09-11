@@ -17,7 +17,7 @@ TEST_SOURCES = $(TESTDIR)/test_configstore.cpp \
 
 TEST_TARGET = $(OUTDIR)/test_configstore
 
-.PHONY: all clean test
+.PHONY: all clean test roundtrip test-converter
 
 all: $(TEST_TARGET)
 
@@ -28,6 +28,24 @@ $(TEST_TARGET): $(TEST_SOURCES)
 
 test: $(TEST_TARGET)
 	$(TEST_TARGET)
+
+# Converter regression tests — rule emission order under first-match-wins
+# (shadow-invariant guard) + optional native load check of built scenarios.
+test-converter: $(TEST_TARGET)
+	python3 $(SRCDIR)/tools/test_log2scenario.py --load-with $(TEST_TARGET)
+
+# log2scenario round-trip: converter output must parse through ConfigStore.
+# A scenario the parser rejects (e.g. an unknown "return" name) fails here
+# instead of on the target machine.
+RT_INPUT ?= $(SRCDIR)/1.jsonl
+RT_OUT = $(OUTDIR)/rt-scenario.json
+
+roundtrip: test-converter
+	@test -f "$(RT_INPUT)" || { \
+	  echo "roundtrip: RT_INPUT '$(RT_INPUT)' does not exist — pass RT_INPUT=<capture.jsonl>"; \
+	  exit 2; }
+	python3 $(SRCDIR)/tools/log2scenario.py $(RT_INPUT) $(RT_OUT)
+	$(TEST_TARGET) --load $(RT_OUT)
 
 clean:
 	rm -rf $(OUTDIR)

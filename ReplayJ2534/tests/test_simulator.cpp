@@ -962,6 +962,165 @@ TEST(sim_echo_no_match) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// First-match-wins + sequence-detection-by-presence scenario.
+// Parity: CanDroid ReplayTransport.matchRule and candroid-fw Index::find
+// answer with the FIRST matching rule in document order; sequence mode is
+// detected by a non-empty sequence[] regardless of "mode".
+// No periodic generators and emitEcho off so the rxQueue holds only replies.
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const char *TEST_SCENARIO_MATCH =
+"{\n"
+"  \"device\": { \"firmwareVersion\": \"1.0\", \"dllVersion\": \"1.0\", \"apiVersion\": \"04.04\", \"vbatt_mV\": 12000 },\n"
+"  \"ioctls\": {},\n"
+"  \"targets\": [\n"
+"    {\n"
+"      \"name\": \"ECU\",\n"
+"      \"match\": { \"protocolId\": \"ISO15765\", \"flags\": \"CAN_ID_BOTH\", \"baud\": 500000 },\n"
+"      \"preferredChannelId\": 1,\n"
+"      \"replies\": [\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-22\", \"mode\": \"prefix\" },\n"
+"          \"response\": { \"data\": \"00-00-07-E8-62-BB-01\", \"delayMs\": 0, \"protocolId\": \"ISO15765\" } },\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-22-01\", \"mode\": \"prefix\" },\n"
+"          \"response\": { \"data\": \"00-00-07-E8-62-CC-01\", \"delayMs\": 0, \"protocolId\": \"ISO15765\" } },\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-21-03\", \"mode\": \"prefix\" },\n"
+"          \"response\": { \"sequence\": [\"00-00-07-E8-61-03-AA\", \"00-00-07-E8-61-03-BB\"],\n"
+"                        \"delayMs\": 0, \"protocolId\": \"ISO15765\" } }\n"
+"      ]\n"
+"    }\n"
+"  ],\n"
+"  \"states\": { \"initial\": \"CLOSED\", \"transitions\": [\n"
+"    { \"event\": \"PassThruOpen\", \"from\": \"CLOSED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruConnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruDisconnect\", \"from\": \"OPENED\", \"to\": \"OPENED\" },\n"
+"    { \"event\": \"PassThruClose\", \"from\": \"OPENED\", \"to\": \"CLOSED\" }\n"
+"  ] }\n"
+"}\n";
+
+static const char *writeMatchScenarioFile() {
+    const char *path = "test_scenario_match.json";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return NULL;
+    fputs(TEST_SCENARIO_MATCH, fp);
+    fclose(fp);
+    return path;
+}
+
+TEST(sim_first_match_wins) {
+    Simulator sim;
+    sim.init(writeMatchScenarioFile(), true);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    // One write matching BOTH rule 0 (broad "…-22") and rule 1 ("…-22-01").
+    // First-match-wins: exactly ONE reply, from rule 0 (document order).
+    // The old all-match loop scheduled a reply per matching rule — a real
+    // ECU answers once.
+    PASSTHRU_MSG req = makeMsg("00-00-07-E0-22-01");
+    unsigned long num = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.writeMsgs(ch, &req, &num, 0));
+
+    Sleep(50);
+    ASSERT_EQ(1, sim.rxQueueSize(ch));
+
+    PASSTHRU_MSG reply;
+    unsigned long rnum = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.readMsgs(ch, &reply, &rnum, 0));
+    ASSERT_EQ(1UL, rnum);
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xBB, reply.Data[5]); // broad rule's marker, not 0xCC
+
+    // Shadowed rule produced nothing extra
+    rnum = 1;
+    ASSERT_EQ(ERR_BUFFER_EMPTY, sim.readMsgs(ch, &reply, &rnum, 0));
+    ASSERT_EQ(0UL, rnum);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+TEST(sim_sequence_without_mode) {
+    // End-to-end presence detection: a rule with sequence[] but NO "mode"
+    // must advance through the array, not answer with the 0-byte empty
+    // response.data the single-mode path produced before presence detection.
+    Simulator sim;
+    sim.init(writeMatchScenarioFile(), true);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    PASSTHRU_MSG req = makeMsg("00-00-07-E0-21-03");
+    unsigned long num = 1;
+    PASSTHRU_MSG reply;
+    unsigned long rnum = 1;
+
+    // 1st write/read: seq[0] (initialization, no advance)
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.readMsgs(ch, &reply, &rnum, 500));
+    ASSERT_EQ(7UL, reply.DataSize); // NOT 0-byte
+    ASSERT_EQ(0xAA, reply.Data[6]);
+
+    // 2nd write/read: instant mode (window=0) advances to seq[1]
+    sim.writeMsgs(ch, &req, &num, 0);
+    rnum = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.readMsgs(ch, &reply, &rnum, 500));
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xBB, reply.Data[6]);
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+TEST(sim_write_multi_first_match) {
+    // *pNumMsgs=2: two DIFFERENT requests in one writeMsgs call. Each gets
+    // its own first-match reply — first-match-wins is per written message,
+    // not per call — delivered in write order.
+    Simulator sim;
+    sim.init(writeMatchScenarioFile(), true);
+
+    unsigned long devId = 0;
+    sim.openDevice(NULL, &devId);
+    unsigned long ch = 0;
+    sim.connect(devId, J2534_ISO15765, CAN_ID_BOTH, 500000, &ch);
+
+    PASSTHRU_MSG reqs[2];
+    reqs[0] = makeMsg("00-00-07-E0-22-01"); // broad rule → 00-00-07-E8-62-BB-01
+    reqs[1] = makeMsg("00-00-07-E0-21-03"); // sequence rule → …-61-03-AA
+    unsigned long num = 2;
+    ASSERT_EQ(STATUS_NOERROR, sim.writeMsgs(ch, reqs, &num, 0));
+    ASSERT_EQ(2UL, num);
+
+    Sleep(50);
+    ASSERT_EQ(2, sim.rxQueueSize(ch));
+
+    PASSTHRU_MSG reply;
+    unsigned long rnum = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.readMsgs(ch, &reply, &rnum, 0));
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xBB, reply.Data[5]); // reply to reqs[0]
+
+    rnum = 1;
+    ASSERT_EQ(STATUS_NOERROR, sim.readMsgs(ch, &reply, &rnum, 0));
+    ASSERT_EQ(7UL, reply.DataSize);
+    ASSERT_EQ(0xAA, reply.Data[6]); // reply to reqs[1]
+
+    rnum = 1;
+    ASSERT_EQ(ERR_BUFFER_EMPTY, sim.readMsgs(ch, &reply, &rnum, 0));
+
+    sim.disconnect(ch);
+    sim.closeDevice(devId);
+    sim.shutdown();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1005,6 +1164,11 @@ int main() {
     RUN_TEST(sim_echo_and_som);
     RUN_TEST(sim_echo_no_match);
 
+    printf("\n--- First-Match-Wins / Sequence-by-Presence ---\n");
+    RUN_TEST(sim_first_match_wins);
+    RUN_TEST(sim_sequence_without_mode);
+    RUN_TEST(sim_write_multi_first_match);
+
     printf("\n--- Version / Filters ---\n");
     RUN_TEST(sim_read_version);
     RUN_TEST(sim_filters);
@@ -1016,6 +1180,7 @@ int main() {
     remove("test_scenario.json");
     remove("test_scenario_seq.json");
     remove("test_scenario_echo.json");
+    remove("test_scenario_match.json");
 
     return g_tests_failed > 0 ? 1 : 0;
 }

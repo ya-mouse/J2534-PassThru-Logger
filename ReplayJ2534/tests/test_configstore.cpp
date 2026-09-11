@@ -320,7 +320,146 @@ TEST(config_sequence_parsing) {
     remove(path);
 }
 
-int main() {
+// ═══════════════════════════════════════════════════════════════════════════
+// Parity tests: sequence detection by presence, timeWindowMs default 600,
+// periodic malformed-entry guard — semantics shared with CanDroid
+// ScenarioLoader.kt and candroid-fw build.rs
+// ═══════════════════════════════════════════════════════════════════════════
+
+static const char *TEST_SCENARIO_PRESENCE =
+"{\n"
+"  \"targets\": [\n"
+"    {\n"
+"      \"name\": \"ECU\",\n"
+"      \"match\": { \"protocolId\": \"ISO15765\" },\n"
+"      \"replies\": [\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-21-01\" },\n"
+"          \"response\": { \"sequence\": [\"00-00-07-E8-61-01-AA\", \"00-00-07-E8-61-01-BB\"],\n"
+"                        \"delayMs\": 5, \"protocolId\": \"ISO15765\" } },\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-21-02\" },\n"
+"          \"response\": { \"mode\": \"sequence\", \"sequence\": [],\n"
+"                        \"data\": \"00-00-07-E8-61-02\", \"protocolId\": \"ISO15765\" } },\n"
+"        { \"match\": { \"data\": \"00-00-07-E0-21-03\" },\n"
+"          \"response\": { \"mode\": \"single\", \"sequence\": [\"00-00-07-E8-61-03-CC\"],\n"
+"                        \"protocolId\": \"ISO15765\" } }\n"
+"      ],\n"
+"      \"periodic\": [\n"
+"        { \"intervalMs\": 100 },\n"
+"        { \"intervalMs\": 200, \"msg\": { \"protocolId\": \"ISO15765\" } },\n"
+"        { \"intervalMs\": 300, \"msg\": { \"protocolId\": \"ISO15765\", \"data\": \"00-00-07-E8-7E-00\" } },\n"
+"        { \"intervalMs\": 400, \"msg\": { \"protocolId\": \"ISO15765\", \"data\": \"\" } }\n"
+"      ]\n"
+"    },\n"
+// No match object at all — every match key must default to "don't care"
+"    { \"name\": \"ANY\" }\n"
+"  ]\n"
+"}\n";
+
+static const char *writePresenceScenarioFile() {
+    const char *path = "test_scenario_presence.json";
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return NULL;
+    fputs(TEST_SCENARIO_PRESENCE, fp);
+    fclose(fp);
+    return path;
+}
+
+TEST(config_sequence_by_presence) {
+    ConfigStore cs;
+    ASSERT_TRUE(cs.load(writePresenceScenarioFile()));
+    const Target *t = cs.findTarget(J2534_ISO15765, 0, 0);
+    ASSERT_TRUE(t != NULL);
+    ASSERT_EQ(3, (int)t->replies.size());
+
+    // Non-empty sequence[] WITHOUT "mode" enters sequence mode — parity with
+    // ScenarioLoader.kt:66 / build.rs:106. The old mode-only check kept this
+    // single and the Simulator answered with a 0-byte response.data.
+    ASSERT_EQ((int)RESPONSE_SEQUENCE, (int)t->replies[0].responseMode);
+    ASSERT_EQ(2, (int)t->replies[0].sequenceData.size());
+    ASSERT_EQ(7, t->replies[0].sequenceData[0].len);
+    ASSERT_EQ(0xAA, t->replies[0].sequenceData[0].data[6]);
+    ASSERT_EQ(5UL, t->replies[0].delayMs);
+
+    // Presence wins even over an explicit "mode":"single"
+    ASSERT_EQ((int)RESPONSE_SEQUENCE, (int)t->replies[2].responseMode);
+    ASSERT_EQ(1, (int)t->replies[2].sequenceData.size());
+
+    // The matched target declared ONLY protocolId: omitted match keys must
+    // read as "don't care". Pins the value-initialization of Target in
+    // parseTargets — stack garbage in hasFlags/hasBaud used to make
+    // findTarget() reject minimal scenarios nondeterministically.
+    ASSERT_TRUE(t->match.hasProtocolId);
+    ASSERT_TRUE(!t->match.hasFlags);
+    ASSERT_TRUE(!t->match.hasBaud);
+
+    // Second target has NO match object at all → matches any connect params
+    ASSERT_EQ(2, (int)cs.targets().size());
+    const Target *any = cs.findTarget(J2534_CAN, 0x1234, 250000);
+    ASSERT_TRUE(any != NULL);
+    ASSERT_EQ(0, strcmp(any->name.c_str(), "ANY"));
+
+    remove("test_scenario_presence.json");
+}
+
+TEST(config_time_window_default_600) {
+    ConfigStore cs;
+    cs.load(writePresenceScenarioFile());
+    const Target *t = cs.findTarget(J2534_ISO15765, 0, 0);
+    ASSERT_TRUE(t != NULL);
+    // Absent timeWindowMs defaults to 600 — CanDroid ScenarioLoader.kt:72
+    // and the authoring doc use 600; the old C++ default was 1000.
+    ASSERT_EQ(600UL, t->replies[0].timeWindowMs);
+    remove("test_scenario_presence.json");
+}
+
+TEST(config_sequence_empty_downgrade) {
+    ConfigStore cs;
+    cs.load(writePresenceScenarioFile());
+    const Target *t = cs.findTarget(J2534_ISO15765, 0, 0);
+    ASSERT_TRUE(t != NULL);
+    // Declared mode/sequence with an EMPTY array still downgrades to single
+    const ReplyRule &r = t->replies[1];
+    ASSERT_EQ((int)RESPONSE_SINGLE, (int)r.responseMode);
+    ASSERT_EQ(0, (int)r.sequenceData.size());
+    ASSERT_EQ(6, r.response.data.len);
+    remove("test_scenario_presence.json");
+}
+
+TEST(config_periodic_missing_msg) {
+    ConfigStore cs;
+    // Entries without "msg", without "msg.data", or with an EMPTY data
+    // string must be skipped (the first case used to deref NULL in
+    // parsePeriodic and crash the load; a 0-length payload would flood the
+    // rxQueue with empty frames). Load succeeds, the well-formed entry
+    // survives.
+    ASSERT_TRUE(cs.load(writePresenceScenarioFile()));
+    const Target *t = cs.findTarget(J2534_ISO15765, 0, 0);
+    ASSERT_TRUE(t != NULL);
+    ASSERT_EQ(1, (int)t->periodic.size());
+    ASSERT_EQ(300UL, t->periodic[0].intervalMs);
+    ASSERT_EQ(6, t->periodic[0].msg.data.len);
+    remove("test_scenario_presence.json");
+}
+
+int main(int argc, char **argv) {
+    // External-file load check — used by `make -f Makefile.native roundtrip`
+    // to prove log2scenario.py output parses (an unknown "return" name makes
+    // load() reject the whole file).
+    if (argc >= 2 && strcmp(argv[1], "--load") == 0) {
+        if (argc != 3) {
+            printf("usage: %s --load <scenario.json>\n", argv[0]);
+            return 2;
+        }
+        ConfigStore cs;
+        if (!cs.load(argv[2])) {
+            printf("LOAD FAILED: %s\n", cs.lastError());
+            return 1;
+        }
+        printf("LOADED %s: %d ioctls, %d targets\n", argv[2],
+               (int)cs.ioctls().size(), (int)cs.targets().size());
+        return 0;
+    }
+
     printf("\n=== ReplayJ2534 ConfigStore Tests (native) ===\n\n");
 
     RUN_TEST(config_load);
@@ -335,6 +474,10 @@ int main() {
     RUN_TEST(config_invalid_json);
     RUN_TEST(config_missing_file);
     RUN_TEST(config_sequence_parsing);
+    RUN_TEST(config_sequence_by_presence);
+    RUN_TEST(config_time_window_default_600);
+    RUN_TEST(config_sequence_empty_downgrade);
+    RUN_TEST(config_periodic_missing_msg);
 
     printf("\n=== Results: %d passed, %d failed, %d total ===\n\n",
            g_tests_passed, g_tests_failed, g_tests_run);

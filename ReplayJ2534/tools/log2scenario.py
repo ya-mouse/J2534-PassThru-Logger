@@ -92,18 +92,26 @@ CONFIG_PARAMS = {
     "FD_CAN_DATA_PHASE_RATE": 0x8029,
 }
 
+# Must match ConfigStore::lookupReturnCode's table EXACTLY (names and values
+# per J2534Defs.h). ConfigStore rejects an unknown name by failing the WHOLE
+# scenario at load, so _process_ioctl validates against this set before
+# emitting. The values were previously off for several codes (e.g.
+# ERR_DEVICE_IN_USE was 0x0C, J2534Defs.h says 0x0E) — corrected here.
 ERROR_CODES = {
     "STATUS_NOERROR": 0x00, "ERR_NOT_SUPPORTED": 0x01,
     "ERR_INVALID_CHANNEL_ID": 0x02, "ERR_INVALID_PROTOCOL_ID": 0x03,
     "ERR_NULL_PARAMETER": 0x04, "ERR_INVALID_IOCTL_VALUE": 0x05,
     "ERR_INVALID_FLAGS": 0x06, "ERR_FAILED": 0x07,
     "ERR_DEVICE_NOT_CONNECTED": 0x08, "ERR_TIMEOUT": 0x09,
-    "ERR_INVALID_MSG": 0x0A, "ERR_EXCEEDED_LIMIT": 0x0B,
-    "ERR_DEVICE_IN_USE": 0x0C, "ERR_INVALID_IOCTL_ID": 0x0D,
+    "ERR_INVALID_MSG": 0x0A, "ERR_INVALID_TIME_INTERVAL": 0x0B,
+    "ERR_EXCEEDED_LIMIT": 0x0C, "ERR_INVALID_MSG_ID": 0x0D,
+    "ERR_DEVICE_IN_USE": 0x0E, "ERR_INVALID_IOCTL_ID": 0x0F,
     "ERR_BUFFER_EMPTY": 0x10, "ERR_BUFFER_FULL": 0x11,
-    "ERR_BUFFER_OVERFLOW": 0x12, "ERR_CHANNEL_IN_USE": 0x13,
-    "ERR_INVALID_FILTER_ID": 0x14, "ERR_NO_FLOW_CONTROL": 0x15,
-    "ERR_INVALID_BAUDRATE": 0x16, "ERR_INVALID_DEVICE_ID": 0x17,
+    "ERR_BUFFER_OVERFLOW": 0x12, "ERR_PIN_INVALID": 0x13,
+    "ERR_CHANNEL_IN_USE": 0x14, "ERR_MSG_PROTOCOL_ID": 0x15,
+    "ERR_INVALID_FILTER_ID": 0x16, "ERR_NO_FLOW_CONTROL": 0x17,
+    "ERR_NOT_UNIQUE": 0x18, "ERR_INVALID_BAUDRATE": 0x19,
+    "ERR_INVALID_DEVICE_ID": 0x1A,
 }
 ERROR_NAMES = {v: k for k, v in ERROR_CODES.items()}
 
@@ -597,7 +605,15 @@ class ScenarioBuilder:
                                 "CLEAR_PERIODIC_MSGS"):
             scope = "channel"
 
-        rule = {"return": ev.return_code, "scope": scope}
+        ret = ev.return_code
+        if ret not in ERROR_CODES:
+            # An unknown name passes through to scenario.json and ConfigStore
+            # fails the whole file at load (parseIoctls → lookupReturnCode).
+            print(f"WARNING: unknown return code {ret!r} at log line "
+                  f"{ev.index}: {ev.text!r} — emitting STATUS_NOERROR",
+                  file=sys.stderr)
+            ret = "STATUS_NOERROR"
+        rule = {"return": ret, "scope": scope}
         if ev.ioctl_name == "READ_VBATT":
             rule["output"] = "auto"
             if ev.vbatt_value:
@@ -754,21 +770,51 @@ class ScenarioBuilder:
         """Conservatively merge reply rules that share an identical response
         and whose match-data share a conflict-free common prefix.
 
-        Sequence-mode rules have varying responses and are never collapsed.
+        Sequence-mode rules have varying responses and are never collapsed,
+        but they ARE part of the shadow-conflict universe passed to
+        _collapse_single_prefix_rules: a collapsed LCP rule matching a
+        sequence rule's requests would silently pin a live-data PID to one
+        canned response — the converter's primary use case.
 
-        The replay engine fires ALL matching prefix rules (no first-match), so
-        a collapsed prefix rule is only emitted when every rule whose
-        match-data starts with that prefix belongs to the same response-group
-        — otherwise the prefix rule would also fire for a different response
-        and produce a spurious extra reply."""
+        Emission order matters because all three replay engines
+        (ReplayJ2534 Simulator.cpp, CanDroid ReplayTransport.kt, candroid-fw
+        index.rs) are first-match-wins in document order: a broader rule
+        listed BEFORE a more specific one shadows it forever. The output is
+        therefore sorted longest-match-first — a rule can then only be
+        shadowed by an earlier rule of >= length, and equal-length distinct
+        prefixes never match the same request. list.sort() is stable, so
+        same-length rules keep their prior relative order."""
         sequence_replies = [r for r in replies
                             if r["response"].get("mode") == "sequence"]
         single_replies = [r for r in replies
                           if r["response"].get("mode") != "sequence"]
-        collapsed = self._collapse_single_prefix_rules(single_replies)
-        return collapsed + sequence_replies
+        collapsed = self._collapse_single_prefix_rules(single_replies, replies)
+        out = collapsed + sequence_replies
+        out.sort(key=lambda r: -len(self._hex_to_bytes(r["match"]["data"])))
+        return out
 
-    def _collapse_single_prefix_rules(self, replies):
+    @staticmethod
+    def _assert_first_match_order(target_name, replies):
+        """Fail loudly if any emitted rule is dead on arrival: under
+        first-match-wins, an earlier rule whose match-data is a byte-prefix
+        of a later rule's (or identical to it) shadows that later rule for
+        every request it could answer. The longest-first sort makes this
+        unreachable for converter output; this guard keeps it that way.
+        Assumes prefix-mode matching (all the converter emits); an "exact"
+        rule is NOT shadowed by a shorter prefix rule, so if exact-mode
+        emission is ever added, skip those pairs here."""
+        datas = [ScenarioBuilder._hex_to_bytes(r["match"]["data"])
+                 for r in replies]
+        for j in range(len(replies)):
+            for i in range(j):
+                if datas[j].startswith(datas[i]):
+                    raise AssertionError(
+                        f"target {target_name!r}: rule {i} match "
+                        f"{replies[i]['match']['data']!r} shadows rule {j} "
+                        f"match {replies[j]['match']['data']!r} under "
+                        f"first-match-wins — emitted order is broken")
+
+    def _collapse_single_prefix_rules(self, replies, all_replies=None):
         if len(replies) < 2:
             return replies
         MIN_PREFIX_BYTES = 3
@@ -804,8 +850,12 @@ class ScenarioBuilder:
             if all(b == lcp_bytes for b in bdatas):
                 continue
             # Conflict: any rule outside this group whose match-data starts
-            # with the same prefix would also trigger the collapsed rule.
-            outside = [r for r in replies if r not in grp]
+            # with the same prefix would be shadowed by the collapsed rule
+            # under first-match-wins. Checked against ALL emitted replies
+            # (singles AND sequences) — checking only the single-mode
+            # collapse candidates let a collapsed LCP swallow sequence rules.
+            universe = replies if all_replies is None else all_replies
+            outside = [r for r in universe if r not in grp]
             if any(self._hex_to_bytes(o["match"]["data"]).startswith(lcp_bytes)
                    for o in outside):
                 continue
@@ -933,9 +983,11 @@ class ScenarioBuilder:
             target["replies"].append(reply_rule)
 
         # Conservatively collapse rules with identical responses and a
-        # conflict-free common match prefix.
+        # conflict-free common match prefix, emit longest-match-first, and
+        # verify no rule ended up shadowed under first-match-wins.
         for target in self.targets.values():
             target["replies"] = self._collapse_prefix_rules(target["replies"])
+            self._assert_first_match_order(target["name"], target["replies"])
 
         # Assign periodic generators to targets
         for channel_id, data, interval_ms, target_key in self.periodic_candidates:

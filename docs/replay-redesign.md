@@ -162,9 +162,10 @@ Three layers replace the single `ReplayEngine`:
 ### Schema rules
 
 - **IOCTL key** may be hex (`"0x10ECB"`) or symbolic (`"READ_VBATT"`).
-  `ConfigStore` normalizes both via the existing `lookupIoctl` table; unknown hex
-  values pass through (for vendor IOCTLs like `0x10ECB` seen in the log).
-- **`return`** is always a symbolic J2534 error name resolved via `lookupError`.
+  `ConfigStore` normalizes both via `parseIoctlKey`/`lookupSymbolic`; unknown
+  hex values pass through (for vendor IOCTLs like `0x10ECB` seen in the log).
+- **`return`** is always a symbolic J2534 error name resolved via
+  `lookupReturnCode`; an unknown name fails the whole file at load.
 - **`output`**: `"auto"` (synthesize a sensible value, e.g. `READ_VBATT` →
   `device.vbatt_mV` as 4-byte LE), a hex byte string (`"00-10-..."`), or
   `null`/omitted (no payload written to caller's buffer).
@@ -174,6 +175,14 @@ Three layers replace the single `ReplayEngine`:
   `Simulator::handleIoctl`.
 - **`consumeInput`** (SET_CONFIG): log the `SCONFIG_LIST` params for diagnostics
   but take no other action.
+- **`response.sequence` / `timeWindowMs`**: a reply response carrying a
+  non-empty `sequence[]` array is a sequence rule — detection is by PRESENCE,
+  the `"mode"` key is informational (parity with CanDroid `ScenarioLoader.kt`
+  and candroid-fw `build.rs`). Entries cycle with time-gated advance:
+  `timeWindowMs` (default **600** when absent, matching CanDroid) is the burst
+  window; reads within it repeat the current entry, reads beyond it advance
+  one step and wrap at the end. A declared-but-empty `sequence` array
+  downgrades the rule to single mode using `response.data`.
 - **Targets**: `match` keys off the `PassThruConnect` parameters. Multiple
   targets allow the probe to talk to different ECUs. `preferredChannelId` is a
   hint; the Simulator assigns the actual ID (reusing freed IDs where possible).
@@ -312,7 +321,10 @@ existing `CRITICAL_SECTION`. The Scheduler takes the lock when pushing to
   - `match.mode == "prefix"` — fire if `msg.Data` starts with `match.data` bytes.
   - `match.mode == "exact"` — full byte equality.
   - `match.mode == "regex"` — hex-string regex (optional, only if needed).
-- Each matched rule enqueues a delayed reply via the Scheduler.
+- The FIRST matching rule (document order) enqueues a delayed reply via the
+  Scheduler; later matching rules are skipped — first-match-wins, parity with
+  CanDroid `ReplayTransport.matchRule` and candroid-fw `Index::find`. A real
+  ECU answers a request once.
 - The written message is not forwarded anywhere (no real bus); it only triggers
   canned replies. `*pNumMsgs` = count accepted. Returns `STATUS_NOERROR`.
 
