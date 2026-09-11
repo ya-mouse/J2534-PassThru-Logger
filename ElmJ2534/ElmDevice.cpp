@@ -194,11 +194,14 @@ bool ElmDevice::resolvePort(char *outPort, int outSize, std::string &err) {
 #ifdef _WIN32
     // Auto-detect is the LAST resort (env → registry → scan). Scanning is
     // cheap; opening what it finds is not, which is why this runs here and
-    // never in DllMain.
-    if (elmScanBluetoothComPort(outPort, outSize, scanErr)) {
+    // never in DllMain. An injected test link has no system port to scan
+    // for: scanning anyway would make suite results depend on whatever
+    // Bluetooth hardware happens to be paired with the build/test machine.
+    if (!testLink_ && elmScanBluetoothComPort(outPort, outSize, scanErr)) {
         ELM_LOGV("ElmDevice: auto-detected Bluetooth SPP port %s", outPort);
         return true;
     }
+    if (testLink_) scanErr = "test link attached; system port scan skipped";
 #else
     scanErr = "Bluetooth COM auto-detect is only available on Windows";
 #endif
